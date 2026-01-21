@@ -1,0 +1,621 @@
+"""Local server implementation for serving terminals over HTTP/WebSocket."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import io
+import json
+import logging
+import signal
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import aiohttp
+from aiohttp import WSMsgType, web
+from rich.ansi import AnsiDecoder
+from rich.console import Console
+
+from . import constants
+from .exit_poller import ExitPoller
+from .identity import generate
+from .poller import Poller
+from .session import SessionConnector
+from .session_manager import SessionManager
+from .types import Meta, RouteKey, SessionID
+
+if TYPE_CHECKING:
+    from .config import Config
+
+log = logging.getLogger("textual-web")
+
+DISCONNECT_RESIZE = (132, 45)
+
+WEBTERM_STATIC_PATH = Path(__file__).parent / "static"
+
+
+def _get_static_path() -> Path | None:
+    """Get the path to static assets from textual-serve."""
+    try:
+        import textual_serve
+
+        static_path = Path(textual_serve.__file__).parent / "static"
+        if static_path.exists():
+            return static_path
+    except ImportError:
+        log.warning("textual-serve not installed - static assets unavailable")
+    return None
+
+
+STATIC_PATH = _get_static_path()
+
+
+class LocalClientConnector(SessionConnector):
+    """Local connector that handles communication between sessions and local server."""
+
+    def __init__(self, server: LocalServer, session_id: SessionID, route_key: RouteKey) -> None:
+        self.server = server
+        self.session_id = session_id
+        self.route_key = route_key
+
+    async def on_data(self, data: bytes) -> None:
+        await self.server.handle_session_data(self.route_key, data)
+
+    async def on_meta(self, meta: Meta) -> None:
+        meta_type = meta.get("type")
+        if meta_type == "open_url":
+            log.info("App requested to open URL: %s", meta.get("url"))
+        elif meta_type == "deliver_file_start":
+            log.info("App requested file delivery: %s", meta.get("path"))
+        else:
+            log.debug("Unknown meta type: %r. Full meta: %r", meta_type, meta)
+
+    async def on_binary_encoded_message(self, payload: bytes) -> None:
+        await self.server.handle_binary_message(self.route_key, payload)
+
+    async def on_close(self) -> None:
+        await self.server.handle_session_close(self.session_id, self.route_key)
+
+
+class LocalServer:
+    """Manages local Textual apps and terminals without Ganglion server."""
+
+    def __init__(
+        self,
+        config_path: str,
+        config: Config,
+        host: str = "0.0.0.0",
+        port: int = 8080,
+        exit_on_idle: int = 0,
+        landing_apps: list | None = None,
+    ) -> None:
+        self.host = host
+        self.port = port
+
+        abs_path = Path(config_path).absolute()
+        path = abs_path if abs_path.is_dir() else abs_path.parent
+        self.config = config
+        self._websocket_server: aiohttp.web.WebSocketResponse | None = None
+        self._poller = Poller()
+        self.session_manager = SessionManager(self._poller, path, config.apps)
+        self.exit_event = asyncio.Event()
+        self._task: asyncio.Task | None = None
+        self._shutdown_task: asyncio.Task | None = None
+        self._shutdown_started = False
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._exit_poller = ExitPoller(self, idle_wait=exit_on_idle)
+
+        self._websocket_connections: dict[RouteKey, web.WebSocketResponse] = {}
+        self._landing_apps = landing_apps or []
+
+    @property
+    def app_count(self) -> int:
+        return len(self.session_manager.apps)
+
+    def add_app(self, name: str, command: str, slug: str = "") -> None:
+        slug = slug or generate().lower()
+        self.session_manager.add_app(name, command, slug=slug)
+
+    def add_terminal(self, name: str, command: str, slug: str = "") -> None:
+        if constants.WINDOWS:
+            log.warning("Sorry, textual-web does not currently support terminals on Windows")
+            return
+        slug = slug or generate().lower()
+        self.session_manager.add_app(name, command, slug=slug, terminal=True)
+
+    async def run(self) -> None:
+        try:
+            await self._run()
+        finally:
+            self._exit_poller.stop()
+            if not constants.WINDOWS:
+                with contextlib.suppress(Exception):
+                    self._poller.exit()
+
+    def on_keyboard_interrupt(self) -> None:
+        print("\r\033[F")
+        log.info("Exit requested")
+
+        if self._shutdown_started:
+            self.exit_event.set()
+            return
+        self._shutdown_started = True
+
+        # Ensure we shut down sessions and websockets before stopping the server.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            if self._shutdown_task is None or self._shutdown_task.done():
+                self._shutdown_task = asyncio.create_task(self._shutdown())
+            return
+
+        if self._loop is not None and self._loop.is_running():
+            if self._shutdown_task is None or self._shutdown_task.done():
+
+                def _schedule() -> None:
+                    self._shutdown_task = asyncio.create_task(self._shutdown())
+
+                self._loop.call_soon_threadsafe(_schedule)
+            return
+
+        self.exit_event.set()
+
+    async def _run(self) -> None:
+        loop = asyncio.get_event_loop()
+        self._loop = loop
+
+        if constants.WINDOWS:
+
+            def exit_handler(_sig, _frame) -> None:
+                self.on_keyboard_interrupt()
+
+            signal.signal(signal.SIGINT, exit_handler)
+        else:
+            loop.add_signal_handler(signal.SIGINT, self.on_keyboard_interrupt)
+            self._poller.set_loop(loop)
+            self._poller.start()
+
+        self._task = asyncio.create_task(self._run_local_server())
+        self._exit_poller.start()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._task
+
+    def _build_routes(self) -> list[web.AbstractRouteDef]:
+        routes: list[web.AbstractRouteDef] = [
+            web.get("/ws/{route_key}", self._handle_websocket),
+            web.get("/screenshot.svg", self._handle_screenshot),
+            web.get("/health", self._handle_health_check),
+            web.get("/", self._handle_root),
+        ]
+
+        if STATIC_PATH is not None and STATIC_PATH.exists():
+            routes.append(web.static("/static", STATIC_PATH))
+            log.info("Static assets served from: %s", STATIC_PATH)
+        else:
+            log.error("Static assets not found at %s - terminal UI will not work", STATIC_PATH)
+
+        if WEBTERM_STATIC_PATH.exists():
+            routes.append(web.static("/static-webterm", WEBTERM_STATIC_PATH))
+
+        return routes
+
+    async def _shutdown(self) -> None:
+        try:
+            for ws in list(self._websocket_connections.values()):
+                with contextlib.suppress(Exception):
+                    await ws.close()
+            await self.session_manager.close_all()
+        finally:
+            self.exit_event.set()
+
+    async def _run_local_server(self) -> None:
+        app = web.Application()
+        app.add_routes(self._build_routes())
+
+        runner = web.AppRunner(app)
+        try:
+            await runner.setup()
+            site = web.TCPSite(runner, self.host, self.port)
+            await site.start()
+
+            log.info("Local server started on %s:%s", self.host, self.port)
+            log.info("Available apps: %s", ", ".join(app.name for app in self.session_manager.apps))
+
+            await self.exit_event.wait()
+        finally:
+            await runner.cleanup()
+
+    async def _dispatch_ws_message(
+        self,
+        envelope: list,
+        route_key: str,
+        ws: web.WebSocketResponse,
+        session_created: bool,
+    ) -> bool:
+        msg_type = envelope[0]
+
+        if msg_type == "stdin":
+            data = envelope[1] if len(envelope) > 1 else ""
+            session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
+            if session_process:
+                await session_process.send_bytes(data.encode("utf-8"))
+
+        elif msg_type == "resize":
+            size_data = envelope[1] if len(envelope) > 1 else {}
+            width = max(1, min(500, int(size_data.get("width", 80))))
+            height = max(1, min(500, int(size_data.get("height", 24))))
+
+            if not session_created:
+                await self._create_terminal_session(route_key, width, height)
+                session_created = True
+            else:
+                session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
+                if session_process:
+                    await session_process.set_terminal_size(width, height)
+
+        elif msg_type == "ping":
+            data = envelope[1] if len(envelope) > 1 else ""
+            await ws.send_json(["pong", data])
+
+        return session_created
+
+    async def _resize_on_disconnect(self, route_key: str) -> None:
+        session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
+        if session_process is None or not hasattr(session_process, "set_terminal_size"):
+            return
+        width, height = DISCONNECT_RESIZE
+        with contextlib.suppress(OSError):
+            await session_process.set_terminal_size(width, height)
+
+    async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
+        route_key = request.match_info["route_key"]
+        ws = web.WebSocketResponse(heartbeat=30.0, max_msg_size=64 * 1024)
+        await ws.prepare(request)
+
+        log.info("WebSocket connection established for route %s", route_key)
+        self._websocket_connections[route_key] = ws
+
+        session_id = self.session_manager.routes.get(RouteKey(route_key))
+        if session_id is not None:
+            session = self.session_manager.get_session(session_id)
+            if session is None or not session.is_running():
+                self.session_manager.on_session_end(session_id)
+                session_id = None
+
+        session_created = session_id is not None
+
+        try:
+            async for msg in ws:
+                if msg.type == WSMsgType.TEXT:
+                    try:
+                        envelope = json.loads(msg.data)
+                        if not isinstance(envelope, list) or len(envelope) < 1:
+                            continue
+                        session_created = await self._dispatch_ws_message(
+                            envelope, route_key, ws, session_created
+                        )
+                    except Exception as e:
+                        log.error("Error processing WebSocket message: %s", e)
+                elif msg.type == WSMsgType.ERROR:
+                    log.error("WebSocket connection error for route %s", route_key)
+                    break
+        finally:
+            log.info("WebSocket connection closed for route %s", route_key)
+            self._websocket_connections.pop(route_key, None)
+            await self._resize_on_disconnect(route_key)
+
+        return ws
+
+    def _select_app_for_route(self, route_key: str):
+        """Pick the app matching the route key, or fall back to default."""
+        app = self.session_manager.apps_by_slug.get(route_key)
+        return app or self.session_manager.get_default_app()
+
+    async def _create_terminal_session(self, route_key: str, width: int, height: int) -> None:
+        available_app = self._select_app_for_route(route_key)
+        if available_app is None:
+            log.error("No app available for route %s", route_key)
+            ws = self._websocket_connections.get(route_key)
+            if ws:
+                await ws.send_json(["error", "No app configured"])
+            return
+
+        session_id = SessionID(generate())
+        log.info(
+            "Creating %s session %s for route %s (%sx%s)",
+            "terminal" if available_app.terminal else "app",
+            session_id,
+            route_key,
+            width,
+            height,
+        )
+
+        session_process = await self.session_manager.new_session(
+            available_app.slug,
+            session_id,
+            RouteKey(route_key),
+            size=(width, height),
+        )
+
+        if session_process is None:
+            log.error("Failed to create session for route %s", route_key)
+            ws = self._websocket_connections.get(route_key)
+            if ws:
+                await ws.send_json(["error", "Failed to create session"])
+            return
+
+        connector = LocalClientConnector(self, session_id, RouteKey(route_key))
+        await session_process.start(connector)
+
+    async def _handle_screenshot(self, request: web.Request) -> web.Response:
+        route_key = request.query.get("route_key")
+        if route_key is None:
+            running = self.session_manager.get_first_running_session()
+            if running:
+                route_key = str(running[0])
+
+        if route_key is None:
+            raise web.HTTPNotFound(text="No running session")
+
+        session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
+        if session_process is None and route_key in self.session_manager.apps_by_slug:
+            await self._create_terminal_session(
+                route_key,
+                width=DISCONNECT_RESIZE[0],
+                height=DISCONNECT_RESIZE[1],
+            )
+            session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
+
+        if session_process is None or not hasattr(session_process, "get_replay_buffer"):
+            raise web.HTTPNotFound(text="Session not found")
+
+        replay_data = await session_process.get_replay_buffer()  # type: ignore[func-returns-value]
+        ansi_text = replay_data.decode("utf-8", errors="replace")
+
+        try:
+            width = int(request.query.get("width", "120"))
+        except ValueError:
+            width = 120
+        width = max(10, min(400, width))
+
+        try:
+            height = int(request.query.get("height", str(DISCONNECT_RESIZE[1])))
+        except ValueError:
+            height = DISCONNECT_RESIZE[1]
+        height = max(5, min(200, height))
+
+        lines = ansi_text.splitlines()
+        if len(lines) > height:
+            ansi_text = "\n".join(lines[-height:]) + "\n"
+
+        console = Console(record=True, width=width, height=height, file=io.StringIO())
+        decoder = AnsiDecoder()
+        for renderable in decoder.decode(ansi_text):
+            console.print(renderable)
+
+        svg = console.export_svg(
+            title="textual-webterm",
+            code_format=(
+                '<svg class="rich-terminal" viewBox="0 0 {terminal_width} {terminal_height}" '
+                'xmlns="http://www.w3.org/2000/svg">'
+                '<style>{styles}</style>'
+                '<defs>'
+                '<clipPath id="{unique_id}-clip-terminal">'
+                '<rect x="0" y="0" width="{terminal_width}" height="{terminal_height}" />'
+                '</clipPath>'
+                '{lines}'
+                '</defs>'
+                '<g clip-path="url(#{unique_id}-clip-terminal)">'
+                '<rect x="0" y="0" width="{terminal_width}" height="{terminal_height}" fill="#000" />'
+                '{backgrounds}'
+                '<g class="{unique_id}-matrix">{matrix}</g>'
+                '</g>'
+                '</svg>'
+            ),
+        )
+        return web.Response(text=svg, content_type="image/svg+xml")
+
+    async def _handle_health_check(self, _request: web.Request) -> web.Response:
+        return web.Response(text="Local server is running")
+
+    def _get_ws_url_from_request(self, request: web.Request, route_key: str) -> str:
+        """Build WebSocket URL honoring reverse proxies and port mapping."""
+
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower()
+        forwarded_host = request.headers.get("X-Forwarded-Host", "").split(",")[0].strip()
+        forwarded_port = request.headers.get("X-Forwarded-Port", "").split(",")[0].strip()
+
+        def _pick_proto() -> str:
+            if forwarded_proto in ("https", "wss"):
+                return "wss"
+            if forwarded_proto in ("http", "ws"):
+                return "ws"
+            return "wss" if request.secure else "ws"
+
+        def _split_host_port(host: str) -> tuple[str, str]:
+            if not host:
+                return "", ""
+            if ":" in host:
+                return host.rsplit(":", 1)
+            return host, ""
+
+        ws_proto = _pick_proto()
+        ws_host, ws_port = _split_host_port(forwarded_host)
+
+        if not ws_host:
+            host_header = request.headers.get("Host", "")
+            ws_host, ws_port = _split_host_port(host_header)
+
+        if not ws_host:
+            ws_host = "localhost" if self.host == "0.0.0.0" else self.host
+            ws_port = str(self.port)
+
+        if not ws_port and forwarded_port:
+            ws_port = forwarded_port
+
+        if ws_port and ws_port not in ("80", "443"):
+            return f"{ws_proto}://{ws_host}:{ws_port}/ws/{route_key}"
+        if not ws_port and self.port not in (80, 443):
+            return f"{ws_proto}://{ws_host}:{self.port}/ws/{route_key}"
+        return f"{ws_proto}://{ws_host}/ws/{route_key}"
+
+    async def _handle_root(self, request: web.Request) -> web.Response:
+        route_key_param = request.query.get("route_key")
+
+        if self._landing_apps and not route_key_param:
+            tiles = [
+                {"slug": app.slug, "name": app.name, "command": app.command}
+                for app in self._landing_apps
+            ]
+            tiles_json = json.dumps(tiles)
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Textual WebTerm Dashboard</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 16px; background: #0f172a; color: #e2e8f0; }}
+        h1 {{ margin-bottom: 8px; }}
+        .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }}
+        .tile {{ background: #1e293b; border: 1px solid #334155; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }}
+        .tile-header {{ padding: 10px 12px; font-weight: bold; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 8px; }}
+        .tile-body {{ padding: 0; }}
+        .thumb {{ width: 100%; height: 180px; object-fit: contain; background: #0b1220; display: block; }}
+        .meta {{ padding: 8px 12px; color: #94a3b8; font-size: 12px; }}
+        a {{ color: inherit; text-decoration: none; }}
+    </style>
+</head>
+<body>
+    <h1>Sessions</h1>
+    <div class=\"grid\" id=\"grid\"></div>
+    <script>
+        const tiles = {tiles_json};
+        function makeTile(tile) {{
+            const card = document.createElement('div');
+            card.className = 'tile';
+            const header = document.createElement('div');
+            header.className = 'tile-header';
+            header.innerHTML = `<span>${{tile.name}}</span>`;
+            const body = document.createElement('div');
+            body.className = 'tile-body';
+            const img = document.createElement('img');
+            img.className = 'thumb';
+            img.alt = tile.name;
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            meta.innerText = tile.command;
+            body.appendChild(img);
+            card.appendChild(header);
+            card.appendChild(body);
+            card.appendChild(meta);
+            card.onclick = () => {{
+                window.open(`/?route_key=${{encodeURIComponent(tile.slug)}}`, '_blank');
+            }};
+            card.img = img;
+            return card;
+        }}
+        const grid = document.getElementById('grid');
+        const cards = tiles.map(makeTile);
+        cards.forEach(c => grid.appendChild(c));
+        async function refresh() {{
+            for (const card of cards) {{
+                const tile = tiles[cards.indexOf(card)];
+                const url = `/screenshot.svg?route_key=${{encodeURIComponent(tile.slug)}}&t=${{Date.now()}}`;
+                card.img.src = url;
+            }}
+        }}
+
+        let refreshTimer = null;
+        function startRefresh() {{
+            if (refreshTimer !== null) return;
+            refresh();
+            refreshTimer = setInterval(refresh, 15000);
+        }}
+        function stopRefresh() {{
+            if (refreshTimer === null) return;
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }}
+
+        document.addEventListener('visibilitychange', () => {{
+            if (document.hidden) stopRefresh();
+            else startRefresh();
+        }});
+
+        if (!document.hidden) startRefresh();
+    </script>
+</body>
+</html>"""
+            return web.Response(text=html_content, content_type="text/html")
+
+        available_app = None
+        if route_key_param:
+            available_app = self.session_manager.apps_by_slug.get(route_key_param)
+        if available_app is None:
+            available_app = self.session_manager.get_default_app()
+        if available_app is None:
+            html_content = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Textual Web Terminal Server</title>
+</head>
+<body>
+    <h2>No Apps Available</h2>
+    <p>No terminal or Textual applications are configured.</p>
+</body>
+</html>"""
+            return web.Response(text=html_content, content_type="text/html")
+
+        route_key: RouteKey | None = None
+        if route_key_param:
+            route_key = RouteKey(route_key_param)
+        else:
+            running = self.session_manager.get_first_running_session()
+            if running:
+                route_key = running[0]
+
+        if route_key is None:
+            route_key = RouteKey(generate().lower())
+
+        ws_url = self._get_ws_url_from_request(request, route_key)
+
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Textual Web Terminal</title>
+    <link rel=\"stylesheet\" href=\"/static/css/xterm.css\">
+    <link rel=\"stylesheet\" href=\"/static-webterm/monospace.css\">
+    <script src=\"/static/js/textual.js\"></script>
+    <style>
+      body {{ background: #000; margin: 0; padding: 0; }}
+    </style>
+</head>
+<body>
+    <div class=\"textual-terminal\" data-session-websocket-url={ws_url!r} data-font-size=\"16\"></div>
+</body>
+</html>"""
+        return web.Response(text=html_content, content_type="text/html")
+
+    async def handle_session_data(self, route_key: RouteKey, data: bytes) -> None:
+        ws = self._websocket_connections.get(route_key)
+        if ws is None:
+            return
+        await ws.send_bytes(data)
+
+    async def handle_binary_message(self, route_key: RouteKey, payload: bytes) -> None:
+        ws = self._websocket_connections.get(route_key)
+        if ws is None:
+            return
+        await ws.send_bytes(payload)
+
+    async def handle_session_close(self, session_id: SessionID, route_key: RouteKey) -> None:
+        self.session_manager.on_session_end(session_id)
+        ws = self._websocket_connections.get(route_key)
+        if ws is not None:
+            with contextlib.suppress(Exception):
+                await ws.close()
+
+    def force_exit(self) -> None:
+        self.exit_event.set()

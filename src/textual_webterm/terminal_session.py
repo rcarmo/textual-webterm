@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import array
+import asyncio
+import contextlib
+import fcntl
+import logging
+import os
+import pty
+import shlex
+import signal
+import termios
+from collections import deque
+from typing import TYPE_CHECKING
+
+import rich.repr
+from importlib_metadata import version
+
+from .session import Session, SessionConnector
+
+if TYPE_CHECKING:
+    from .poller import Poller
+    from .types import Meta, SessionID
+
+log = logging.getLogger("textual-web")
+
+# Maximum bytes to keep in replay buffer for reconnection
+REPLAY_BUFFER_SIZE = 64 * 1024  # 64KB
+
+
+@rich.repr.auto
+class TerminalSession(Session):
+    """A session that manages a terminal."""
+
+    def __init__(
+        self,
+        poller: Poller,
+        session_id: SessionID,
+        command: str,
+    ) -> None:
+        self.poller = poller
+        self.session_id = session_id
+        self.command = command or os.environ.get("SHELL", "sh")
+        self.master_fd: int | None = None
+        self.pid: int | None = None
+        self._task: asyncio.Task | None = None
+        self._replay_buffer: deque[bytes] = deque()
+        self._replay_buffer_size = 0
+        self._replay_lock = asyncio.Lock()
+        super().__init__()
+
+    def __rich_repr__(self) -> rich.repr.Result:
+        yield "session_id", self.session_id
+        yield "command", self.command
+
+    async def open(self, width: int = 80, height: int = 24) -> None:
+        log.info(f"Opening terminal session {self.session_id} with command: {self.command}")
+        pid, master_fd = pty.fork()
+        self.pid = pid
+        self.master_fd = master_fd
+        if pid == pty.CHILD:
+            os.environ["TERM_PROGRAM"] = "textual-webterm"
+            os.environ["TERM_PROGRAM_VERSION"] = version("textual-webterm")
+            try:
+                argv = shlex.split(self.command)
+            except ValueError:
+                os._exit(1)
+            if not argv:
+                os._exit(1)
+            try:
+                os.execvp(argv[0], argv)  ## Exits the app
+            except OSError:
+                os._exit(1)
+        try:
+            self._set_terminal_size(width, height)
+        except OSError:
+            # Clean up on failure
+            os.close(master_fd)
+            self.master_fd = None
+            raise
+        log.debug(f"Terminal session {self.session_id} opened successfully")
+
+    def _set_terminal_size(self, width: int, height: int) -> None:
+        buf = array.array("h", [height, width, 0, 0])
+        assert self.master_fd is not None
+        fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, buf)
+
+    async def set_terminal_size(self, width: int, height: int) -> None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._set_terminal_size, width, height)
+
+    async def _add_to_replay_buffer(self, data: bytes) -> None:
+        """Add data to replay buffer, maintaining size limit."""
+        async with self._replay_lock:
+            self._replay_buffer.append(data)
+            self._replay_buffer_size += len(data)
+            while self._replay_buffer_size > REPLAY_BUFFER_SIZE and self._replay_buffer:
+                old_data = self._replay_buffer.popleft()
+                self._replay_buffer_size -= len(old_data)
+
+    async def get_replay_buffer(self) -> bytes:
+        """Get the contents of the replay buffer."""
+        async with self._replay_lock:
+            return b"".join(self._replay_buffer)
+
+    def update_connector(self, connector: SessionConnector) -> None:
+        """Update the connector for reconnection without restarting the session."""
+        self._connector = connector
+        log.debug(f"Updated connector for session {self.session_id}")
+
+    async def start(self, connector: SessionConnector) -> asyncio.Task:
+        self._connector = connector
+        assert self.master_fd is not None
+        if self._task is not None:
+            # Already running, just update connector (handled by update_connector)
+            return self._task
+        self._task = asyncio.create_task(self.run())
+        return self._task
+
+    async def run(self) -> None:
+        assert self.master_fd is not None
+        queue = self.poller.add_file(self.master_fd)
+        try:
+            while True:
+                data = await queue.get()
+                if not data:
+                    break
+                # Store in replay buffer for reconnection
+                await self._add_to_replay_buffer(data)
+                # Send to current connector
+                if self._connector:
+                    await self._connector.on_data(data)
+        except OSError:
+            log.exception("error in terminal.run")
+        finally:
+            if self._connector:
+                await self._connector.on_close()
+            if self.master_fd is not None:
+                fd = self.master_fd
+                self.master_fd = None
+                # Remove from poller first (while fd is still valid), then close
+                self.poller.remove_file(fd)
+                os.close(fd)
+
+    async def send_bytes(self, data: bytes) -> bool:
+        if self.master_fd is None:
+            return False
+        await self.poller.write(self.master_fd, data)
+        return True
+
+    async def send_meta(self, data: Meta) -> bool:
+        return True
+
+    async def close(self) -> None:
+        if self.pid is not None:
+            try:
+                os.kill(self.pid, signal.SIGHUP)
+            except ProcessLookupError:
+                pass  # Process already gone
+            except Exception as e:
+                log.warning(f"Error closing terminal session {self.session_id}: {e}")
+
+    async def wait(self) -> None:
+        if self._task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+    def is_running(self) -> bool:
+        """Check if the terminal session is still running."""
+        if self.master_fd is None or self._task is None:
+            return False
+        # Check if process is actually alive
+        if self.pid is not None:
+            try:
+                os.kill(self.pid, 0)  # Signal 0 checks existence
+                return True
+            except OSError:
+                return False
+        # pid is None means process not started or already exited
+        return False

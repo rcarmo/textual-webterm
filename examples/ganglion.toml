@@ -1,0 +1,47 @@
+[account]
+
+[app.Calculator]
+path = "./"
+command = "python calculator.py"
+
+
+[app.Easing]
+slug = "easing"
+path = "./"
+command = "textual easing"
+
+
+[app.Keys]
+slug = "keys"
+path = "./"
+command = "textual keys"
+
+
+[app.Borders]
+slug = "borders"
+path = "./"
+command = "textual borders"
+
+
+[app.Demo]
+name = "Demo"
+slug = "demo"
+path = "./"
+command = "python -m textual"
+
+[terminal.Terminal]
+name = "Terminal"
+path = "./"
+terminal = true
+
+[app.OpenLink]
+name = "Open Link"
+slug = "open-link"
+path = "./"
+command = "python open_link.py"
+
+[app.Download]
+name = "Download"
+slug = "download"
+path = "./"
+command = "python download.py"

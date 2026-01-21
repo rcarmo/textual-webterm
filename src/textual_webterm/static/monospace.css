@@ -1,0 +1,19 @@
+/* Generic monospace font stack for terminal rendering.
+
+Prefers system monospace fonts, with optional Fira Code / Roboto Mono if available.
+We avoid external font fetching (e.g. Google Fonts) to keep local server self-contained.
+*/
+
+:root {
+  --textual-webterm-mono: ui-monospace, "SFMono-Regular", "FiraCode Nerd Font",
+    "FiraMono Nerd Font", "Fira Code", "Roboto Mono", Menlo, Monaco, Consolas,
+    "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
+}
+
+body {
+  font-family: var(--textual-webterm-mono);
+}
+
+.xterm {
+  font-family: var(--textual-webterm-mono);
+}

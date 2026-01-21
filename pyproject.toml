@@ -1,0 +1,119 @@
+[tool.poetry]
+name = "textual-webterm"
+version = "0.1.9"
+description = "Serve terminal sessions over the web"
+authors = ["Will McGugan <will@textualize.io>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "textual_webterm", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+textual-serve = "^1.1.0"
+aiohttp = "^3.13.0"
+uvloop = { version = "^0.22.0", markers = "sys_platform != 'win32'" }
+click = "^8.1.7"
+pydantic = "^2.7.0"
+xdg = "^6.0.0"
+msgpack = "^1.1.0"
+importlib-metadata = ">=6.0.0"
+httpx = ">=0.27.0"
+tomli = { version = "^2.0.1", python = "<3.11" }
+pyyaml = "^6.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.24.0"
+pytest-cov = "^6.0.0"
+pytest-timeout = "^2.3.0"
+ruff = "^0.9.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+textual-webterm = "textual_webterm.cli:app"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+    "TC",     # flake8-type-checking
+    "PTH",    # flake8-use-pathlib
+    "ERA",    # eradicate (commented out code)
+    "PL",     # Pylint
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "PLR0912", # too many branches
+    "PLR0913", # too many arguments
+    "PLR0915", # too many statements
+    "PLR2004", # magic value comparison
+    "ARG001", # unused function argument
+    "ARG002", # unused method argument
+    "PLC0415", # import not at top level (needed for optional deps)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["textual_webterm"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+timeout = 30
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.coverage.run]
+source = ["src/textual_webterm"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    # Integration-heavy modules that require running servers/processes
+    "*/local_server.py",
+    "*/app_session.py",
+    "*/terminal_session.py",
+    "*/exit_poller.py",
+    "*/poller.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "assert ",
+]
+# Unit test coverage target - integration tests would add ~20% more
+fail_under = 80
