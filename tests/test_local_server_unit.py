@@ -6,7 +6,7 @@ import pytest
 from aiohttp import web
 
 from textual_webterm.config import App, Config
-from textual_webterm.local_server import LocalServer
+from textual_webterm.local_server import LocalServer, _apply_carriage_returns
 
 
 class TestGetStaticPath:
@@ -104,6 +104,10 @@ class TestLocalServer:
 
 class TestLocalServerHelpers:
     """Tests for LocalServer helper methods."""
+
+    def test_apply_carriage_returns_overwrites_line(self):
+        text = "hello\rworld\nnext"
+        assert _apply_carriage_returns(text) == ["world", "next"]
 
     @pytest.mark.asyncio
     async def test_keyboard_interrupt_closes_sessions_and_websockets(self, server, monkeypatch):
