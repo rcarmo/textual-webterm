@@ -622,3 +622,149 @@ class TestLocalServerMoreCoverage:
 
         await connector.on_close()
         server.handle_session_close.assert_awaited_once_with("sid", "rk")
+
+    @pytest.mark.asyncio
+    async def test_run_stops_exit_poller_and_exits_poller(self, server_with_no_apps, monkeypatch):
+        async def boom():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(server_with_no_apps, "_run", boom)
+        server_with_no_apps._exit_poller.stop = MagicMock()
+        server_with_no_apps._poller.exit = MagicMock()
+
+        with pytest.raises(RuntimeError):
+            await server_with_no_apps.run()
+
+        server_with_no_apps._exit_poller.stop.assert_called_once()
+        server_with_no_apps._poller.exit.assert_called_once()
+
+    def test_on_keyboard_interrupt_sets_event_when_already_shutting_down(self, server_with_no_apps):
+        server_with_no_apps._shutdown_started = True
+        assert not server_with_no_apps.exit_event.is_set()
+        server_with_no_apps.on_keyboard_interrupt()
+        assert server_with_no_apps.exit_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_on_keyboard_interrupt_schedules_shutdown_in_running_loop(self, server_with_no_apps):
+        called = {"shutdown": False}
+
+        async def shutdown():
+            called["shutdown"] = True
+            server_with_no_apps.exit_event.set()
+
+        server_with_no_apps._shutdown = shutdown  # type: ignore[method-assign]
+        server_with_no_apps.on_keyboard_interrupt()
+
+        assert server_with_no_apps._shutdown_task is not None
+        await server_with_no_apps._shutdown_task
+        assert called["shutdown"] is True
+
+    def test_on_keyboard_interrupt_uses_call_soon_threadsafe_when_loop_running(
+        self, server_with_no_apps, monkeypatch
+    ):
+        async def shutdown():
+            return None
+
+        server_with_no_apps._shutdown = shutdown  # type: ignore[method-assign]
+
+        fake_loop = MagicMock()
+        fake_loop.is_running = MagicMock(return_value=True)
+        server_with_no_apps._loop = fake_loop
+
+        created = {"called": False}
+
+        def fake_create_task(coro):
+            created["called"] = True
+            coro.close()
+            return MagicMock()
+
+        monkeypatch.setattr("textual_webterm.local_server.asyncio.create_task", fake_create_task)
+
+        server_with_no_apps.on_keyboard_interrupt()
+        assert fake_loop.call_soon_threadsafe.called
+
+        schedule = fake_loop.call_soon_threadsafe.call_args.args[0]
+        schedule()
+        assert created["called"] is True
+
+    def test_build_routes_logs_error_when_static_path_missing(self, server_with_no_apps, monkeypatch):
+        from pathlib import Path
+
+        from textual_webterm import local_server
+
+        class FakePath(Path):
+            _flavour = type(Path())._flavour
+
+            def exists(self) -> bool:  # type: ignore[override]
+                return False
+
+        monkeypatch.setattr(local_server, "STATIC_PATH", FakePath("/definitely-missing"))
+        monkeypatch.setattr(local_server.log, "error", MagicMock())
+
+        server_with_no_apps._build_routes()
+        local_server.log.error.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_ws_message_stdin_without_payload_sends_empty(self, server_with_no_apps, monkeypatch):
+        session = MagicMock()
+        session.send_bytes = AsyncMock()
+        monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
+
+        ws = MagicMock()
+        created = await server_with_no_apps._dispatch_ws_message(["stdin"], "rk", ws, False)
+        assert created is False
+        session.send_bytes.assert_awaited_once_with(b"")
+
+    @pytest.mark.asyncio
+    async def test_dispatch_ws_message_resize_updates_existing_session(self, server_with_no_apps, monkeypatch):
+        session = MagicMock()
+        session.set_terminal_size = AsyncMock()
+        monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
+
+        ws = MagicMock()
+        created = await server_with_no_apps._dispatch_ws_message(
+            ["resize", {"width": 100, "height": 50}], "rk", ws, True
+        )
+        assert created is True
+        session.set_terminal_size.assert_awaited_once_with(100, 50)
+
+    @pytest.mark.asyncio
+    async def test_dispatch_ws_message_resize_no_session_noop(self, server_with_no_apps, monkeypatch):
+        monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: None)
+
+        ws = MagicMock()
+        created = await server_with_no_apps._dispatch_ws_message(
+            ["resize", {"width": 100, "height": 50}], "rk", ws, True
+        )
+        assert created is True
+
+    @pytest.mark.asyncio
+    async def test_handle_screenshot_truncates_replay_buffer_before_decode(self, server_with_no_apps, monkeypatch):
+        from textual_webterm.local_server import SCREENSHOT_MAX_BYTES
+
+        request = MagicMock()
+        request.query = {"route_key": "rk"}
+        request.headers = {}
+
+        session = MagicMock()
+        session.get_replay_buffer = AsyncMock(return_value=b"x" * (SCREENSHOT_MAX_BYTES + 10))
+        monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
+
+        server_with_no_apps._route_last_activity["rk"] = 1.0
+
+        captured = {"len": None}
+
+        def apply_cr(text: str):
+            captured["len"] = len(text)
+            return ["x"]
+
+        async def fake_to_thread(_fn):
+            return "<svg></svg>"
+
+        monkeypatch.setattr("textual_webterm.local_server._apply_carriage_returns", apply_cr)
+        monkeypatch.setattr("textual_webterm.local_server.asyncio.to_thread", AsyncMock(side_effect=fake_to_thread))
+        monkeypatch.setattr("textual_webterm.local_server._rewrite_svg_fonts", lambda s: s)
+
+        resp = await server_with_no_apps._handle_screenshot(request)
+        assert resp.content_type == "image/svg+xml"
+        assert captured["len"] == SCREENSHOT_MAX_BYTES

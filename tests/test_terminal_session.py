@@ -286,3 +286,160 @@ class TestTerminalSession:
 
         assert await session.send_bytes(b"x") is True
         poller.write.assert_awaited_once_with(10, b"x")
+
+    @pytest.mark.asyncio
+    async def test_open_set_terminal_size_oserror_closes_fd_and_clears_master_fd(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+
+        with (
+            patch("textual_webterm.terminal_session.pty.fork", return_value=(1234, 99)),
+            patch.object(session, "_set_terminal_size", side_effect=OSError("bad")),
+            patch("textual_webterm.terminal_session.os.close") as mock_close,
+            pytest.raises(OSError),
+        ):
+            await session.open(width=80, height=24)
+
+        mock_close.assert_called_once_with(99)
+        assert session.master_fd is None
+
+    @pytest.mark.asyncio
+    async def test_set_terminal_size_uses_executor(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+
+        loop = asyncio.get_running_loop()
+        with patch.object(loop, "run_in_executor", new=AsyncMock()) as run_in_executor:
+            await session.set_terminal_size(80, 24)
+
+        run_in_executor.assert_awaited_once_with(None, session._set_terminal_size, 80, 24)
+
+    def test__set_terminal_size_calls_ioctl(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+
+        with patch("textual_webterm.terminal_session.fcntl.ioctl") as mock_ioctl:
+            session._set_terminal_size(80, 24)
+
+        assert mock_ioctl.called
+
+    @pytest.mark.asyncio
+    async def test_start_creates_task_when_not_running(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+
+        session.run = AsyncMock()  # type: ignore[method-assign]
+
+        connector = MagicMock()
+        task = await session.start(connector)
+        assert task is session._task
+        assert session._connector is connector
+
+        await task
+        session.run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_without_connector_still_closes(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        await queue.put(b"hello")
+        await queue.put(None)
+
+        poller = MagicMock()
+        poller.add_file = MagicMock(return_value=queue)
+        poller.remove_file = MagicMock()
+
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+        session._connector = None
+
+        with patch("textual_webterm.terminal_session.os.close") as mock_close:
+            await session.run()
+
+        poller.remove_file.assert_called_once_with(10)
+        mock_close.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
+    async def test_run_oserror_still_closes(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        queue = MagicMock()
+        queue.get = AsyncMock(side_effect=OSError("boom"))
+
+        poller = MagicMock()
+        poller.add_file = MagicMock(return_value=queue)
+        poller.remove_file = MagicMock()
+
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+        session._connector = None
+
+        with patch("textual_webterm.terminal_session.os.close") as mock_close:
+            await session.run()
+
+        poller.remove_file.assert_called_once_with(10)
+        mock_close.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
+    async def test_close_process_lookup_error_is_ignored(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+        session.pid = 123
+
+        with patch("textual_webterm.terminal_session.os.kill", side_effect=ProcessLookupError()):
+            await session.close()
+
+    @pytest.mark.asyncio
+    async def test_close_logs_warning_on_unexpected_exception(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+        session.pid = 123
+
+        with (
+            patch("textual_webterm.terminal_session.os.kill", side_effect=RuntimeError("x")),
+            patch("textual_webterm.terminal_session.log.warning") as warn,
+        ):
+            await session.close()
+
+        assert warn.called
+
+    @pytest.mark.asyncio
+    async def test_wait_suppresses_cancelled_error(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+
+        task = asyncio.create_task(asyncio.sleep(10))
+        task.cancel()
+        session._task = task
+
+        await session.wait()
+
+    def test_is_running_false_when_kill_fails(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+        session._task = MagicMock()
+        session.pid = 123
+
+        with patch("textual_webterm.terminal_session.os.kill", side_effect=OSError()):
+            assert session.is_running() is False
