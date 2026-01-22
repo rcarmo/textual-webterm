@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
 import logging
@@ -34,6 +35,7 @@ DISCONNECT_RESIZE = (132, 45)
 # Avoid heavy screenshot rendering from processing unbounded output.
 SCREENSHOT_MAX_BYTES = 65536
 SCREENSHOT_CACHE_SECONDS = 1.0
+SCREENSHOT_MAX_CACHE_SECONDS = 60.0
 
 WEBTERM_STATIC_PATH = Path(__file__).parent / "static"
 
@@ -63,6 +65,7 @@ class LocalClientConnector(SessionConnector):
         self.route_key = route_key
 
     async def on_data(self, data: bytes) -> None:
+        self.server.mark_route_activity(str(self.route_key))
         await self.server.handle_session_data(self.route_key, data)
 
     async def on_meta(self, meta: Meta) -> None:
@@ -104,6 +107,22 @@ def _apply_carriage_returns(text: str) -> list[str]:
 
 
 class LocalServer:
+    def mark_route_activity(self, route_key: str) -> None:
+        self._route_last_activity[route_key] = asyncio.get_event_loop().time()
+
+    def _get_screenshot_cache_ttl(self, route_key: str, now: float) -> float:
+        last_activity = self._route_last_activity.get(route_key, 0.0)
+        idle_for = max(0.0, now - last_activity)
+
+        # Active sessions refresh quickly; idle sessions back off aggressively.
+        if idle_for < 5.0:
+            return SCREENSHOT_CACHE_SECONDS
+        if idle_for < 30.0:
+            return 5.0
+        if idle_for < 300.0:
+            return 15.0
+        return SCREENSHOT_MAX_CACHE_SECONDS
+
     """Manages local Textual apps and terminals without Ganglion server."""
 
     def __init__(
@@ -135,7 +154,9 @@ class LocalServer:
         self._landing_apps = landing_apps or []
 
         self._screenshot_cache: dict[str, tuple[float, str]] = {}
+        self._screenshot_cache_etag: dict[str, str] = {}
         self._screenshot_locks: dict[str, asyncio.Lock] = {}
+        self._route_last_activity: dict[str, float] = {}
 
     @property
     def app_count(self) -> int:
@@ -423,9 +444,19 @@ class LocalServer:
             ansi_text = "\n".join(lines[-height:]) + "\n"
 
         now = asyncio.get_event_loop().time()
+        ttl = self._get_screenshot_cache_ttl(route_key, now)
         cached = self._screenshot_cache.get(route_key)
-        if cached is not None and (now - cached[0]) < SCREENSHOT_CACHE_SECONDS:
-            return web.Response(text=cached[1], content_type="image/svg+xml")
+
+        if cached is not None:
+            etag = self._screenshot_cache_etag.get(route_key)
+            if etag and request.headers.get("If-None-Match") == etag:
+                raise web.HTTPNotModified(headers={"ETag": etag, "Cache-Control": "no-cache"})
+
+            if (now - cached[0]) < ttl:
+                headers = {"Cache-Control": "no-cache"}
+                if etag:
+                    headers["ETag"] = etag
+                return web.Response(text=cached[1], content_type="image/svg+xml", headers=headers)
 
         lock = self._screenshot_locks.get(route_key)
         if lock is None:
@@ -434,9 +465,17 @@ class LocalServer:
 
         async with lock:
             # Another request may have refreshed the cache while we waited.
+            ttl = self._get_screenshot_cache_ttl(route_key, now)
             cached = self._screenshot_cache.get(route_key)
-            if cached is not None and (now - cached[0]) < SCREENSHOT_CACHE_SECONDS:
-                return web.Response(text=cached[1], content_type="image/svg+xml")
+            etag = self._screenshot_cache_etag.get(route_key)
+            if cached is not None:
+                if etag and request.headers.get("If-None-Match") == etag:
+                    raise web.HTTPNotModified(headers={"ETag": etag, "Cache-Control": "no-cache"})
+                if (now - cached[0]) < ttl:
+                    headers = {"Cache-Control": "no-cache"}
+                    if etag:
+                        headers["ETag"] = etag
+                    return web.Response(text=cached[1], content_type="image/svg+xml", headers=headers)
 
             def _render_svg() -> str:
                 console = Console(record=True, width=width, height=height, file=io.StringIO())
@@ -466,8 +505,11 @@ class LocalServer:
                 )
 
             svg = await asyncio.to_thread(_render_svg)
+            etag = hashlib.sha1(svg.encode("utf-8"), usedforsecurity=False).hexdigest()
             self._screenshot_cache[route_key] = (asyncio.get_event_loop().time(), svg)
-            return web.Response(text=svg, content_type="image/svg+xml")
+            self._screenshot_cache_etag[route_key] = etag
+            headers = {"Cache-Control": "no-cache", "ETag": etag}
+            return web.Response(text=svg, content_type="image/svg+xml", headers=headers)
 
     async def _handle_health_check(self, _request: web.Request) -> web.Response:
         return web.Response(text="Local server is running")
@@ -573,7 +615,7 @@ class LocalServer:
         async function refresh() {{
             for (const card of cards) {{
                 const tile = tiles[cards.indexOf(card)];
-                const url = `/screenshot.svg?route_key=${{encodeURIComponent(tile.slug)}}&t=${{Date.now()}}`;
+                const url = `/screenshot.svg?route_key=${{encodeURIComponent(tile.slug)}}`;
                 card.img.src = url;
             }}
         }}
