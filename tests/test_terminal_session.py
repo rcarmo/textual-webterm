@@ -1,10 +1,11 @@
 """Tests for terminal_session module."""
 
+import asyncio
 import os
 import platform
 import pty
 import shlex
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -192,3 +193,96 @@ class TestTerminalSession:
         mock_split.assert_called_once_with(command)
         mock_execvp.assert_called_once_with("echo", ["echo", "hello world"])
         mock_exit.assert_called_once_with(1)
+
+    @pytest.mark.asyncio
+    async def test_open_parent_branch_sets_fd_and_pid(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+
+        with (
+            patch("textual_webterm.terminal_session.pty.fork", return_value=(1234, 99)),
+            patch.object(session, "_set_terminal_size") as set_size,
+        ):
+            await session.open(width=80, height=24)
+
+        assert session.pid == 1234
+        assert session.master_fd == 99
+        set_size.assert_called_once_with(80, 24)
+
+    @pytest.mark.asyncio
+    async def test_open_bad_command_exits(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bad")
+
+        with (
+            patch("textual_webterm.terminal_session.pty.fork", return_value=(pty.CHILD, 123)),
+            patch("textual_webterm.terminal_session.shlex.split", side_effect=ValueError("bad")),
+            patch("textual_webterm.terminal_session.os._exit", side_effect=SystemExit(1)) as mock_exit,
+            pytest.raises(SystemExit),
+        ):
+            await session.open()
+
+        mock_exit.assert_called_once_with(1)
+
+    @pytest.mark.asyncio
+    async def test_run_reads_from_poller_and_closes(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        await queue.put(b"hello")
+        await queue.put(None)
+
+        poller = MagicMock()
+        poller.add_file = MagicMock(return_value=queue)
+        poller.remove_file = MagicMock()
+
+        connector = MagicMock()
+        connector.on_data = AsyncMock()
+        connector.on_close = AsyncMock()
+
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+        session._connector = connector
+
+        with patch("textual_webterm.terminal_session.os.close") as mock_close:
+            await session.run()
+
+        connector.on_data.assert_awaited_once_with(b"hello")
+        connector.on_close.assert_awaited_once()
+        poller.remove_file.assert_called_once_with(10)
+        mock_close.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
+    async def test_start_updates_connector_when_already_running(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+
+        existing = asyncio.create_task(asyncio.sleep(0))
+        session._task = existing
+
+        connector = MagicMock()
+        task = await session.start(connector)
+        assert task is existing
+        assert session._connector is connector
+
+        await existing
+
+    @pytest.mark.asyncio
+    async def test_send_bytes_writes_via_poller(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        poller.write = AsyncMock()
+
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+
+        assert await session.send_bytes(b"x") is True
+        poller.write.assert_awaited_once_with(10, b"x")

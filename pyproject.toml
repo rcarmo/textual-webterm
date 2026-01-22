@@ -99,10 +99,7 @@ branch = true
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    # Integration-heavy modules that require running servers/processes
-    "*/app_session.py",
-    "*/terminal_session.py",
-    "*/exit_poller.py",
+    # Thread/FD polling integration is harder to deterministically unit test
     "*/poller.py",
 ]
 

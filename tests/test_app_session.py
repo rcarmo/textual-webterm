@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -113,6 +114,8 @@ class TestAppSessionConnector:
         """Create a mock connector."""
         connector = MagicMock()
         connector.on_data = AsyncMock()
+        connector.on_meta = AsyncMock()
+        connector.on_binary_encoded_message = AsyncMock()
         connector.on_close = AsyncMock()
         return connector
 
@@ -131,3 +134,60 @@ class TestAppSessionConnector:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+    def test_encode_packet(self, tmp_path):
+        session = AppSession(tmp_path, "echo test", "sid")
+        packet = session.encode_packet(b"D", b"abc")
+        assert packet[:1] == b"D"
+        assert packet[1:5] == (3).to_bytes(4, "big")
+        assert packet[5:] == b"abc"
+
+    @pytest.mark.asyncio
+    async def test_send_bytes_handles_broken_pipe(self, tmp_path):
+        session = AppSession(tmp_path, "echo test", "sid")
+        stdin = MagicMock()
+        stdin.write = MagicMock(side_effect=BrokenPipeError())
+        stdin.drain = AsyncMock()
+        session._process = MagicMock(stdin=stdin)
+        assert await session.send_bytes(b"x") is False
+
+    @pytest.mark.asyncio
+    async def test_send_meta_encodes_json_and_writes(self, tmp_path):
+        session = AppSession(tmp_path, "echo test", "sid")
+        stdin = MagicMock()
+        stdin.write = MagicMock()
+        stdin.drain = AsyncMock()
+        session._process = MagicMock(stdin=stdin)
+
+        meta = {"type": "hello", "n": 1}
+        assert await session.send_meta(meta) is True
+        written = stdin.write.call_args.args[0]
+        assert written[:1] == b"M"
+        payload = written[5:]
+        assert json.loads(payload.decode("utf-8")) == meta
+
+    @pytest.mark.asyncio
+    async def test_open_sets_env_and_cwd(self, tmp_path, monkeypatch):
+        session = AppSession(tmp_path, "echo test", "sid", devtools=True)
+
+        fake_proc = MagicMock()
+        fake_proc.stdin = MagicMock()
+        fake_proc.stdout = MagicMock()
+        fake_proc.stderr = MagicMock()
+
+        async def fake_create(command, **kwargs):
+            assert command == "echo test"
+            assert kwargs["cwd"] == str(tmp_path)
+            env = kwargs["env"]
+            assert env["COLUMNS"] == "100"
+            assert env["ROWS"] == "40"
+            assert "TEXTUAL" in env
+            return fake_proc
+
+        monkeypatch.setattr(asyncio, "create_subprocess_shell", fake_create)
+        monkeypatch.setattr(session, "set_terminal_size", AsyncMock())
+
+        await session.open(width=100, height=40)
+        assert session._process is fake_proc
+
+    # run() packet decoding coverage is exercised in test_app_session_run_packets.py
