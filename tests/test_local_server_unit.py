@@ -239,6 +239,8 @@ class TestLocalServerHelpers:
         response = await server._handle_screenshot(request)
         assert response.content_type == "image/svg+xml"
         assert "<svg" in response.text
+        assert "ui-monospace" in response.text
+        assert "cdnjs.cloudflare.com" not in response.text
         assert created["called"][0] == "known"
         assert created["called"][1:] == (132, 45)
 

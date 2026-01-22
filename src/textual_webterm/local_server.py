@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import logging
+import re
 import signal
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -36,6 +37,12 @@ DISCONNECT_RESIZE = (132, 45)
 SCREENSHOT_MAX_BYTES = 65536
 SCREENSHOT_CACHE_SECONDS = 1.0
 SCREENSHOT_MAX_CACHE_SECONDS = 60.0
+
+SVG_MONO_FONT_STACK = (
+    'ui-monospace, "SFMono-Regular", "FiraCode Nerd Font", "FiraMono Nerd Font", '
+    '"Fira Code", "Roboto Mono", Menlo, Monaco, Consolas, "Liberation Mono", '
+    '"DejaVu Sans Mono", "Courier New", monospace'
+)
 
 WEBTERM_STATIC_PATH = Path(__file__).parent / "static"
 
@@ -82,6 +89,22 @@ class LocalClientConnector(SessionConnector):
 
     async def on_close(self) -> None:
         await self.server.handle_session_close(self.session_id, self.route_key)
+
+
+def _rewrite_svg_fonts(svg: str) -> str:
+    """Make Rich SVG output self-contained and aligned with our monospace styling."""
+
+    # Rich export_svg embeds @font-face rules that reference external CDNs.
+    svg = re.sub(r"@font-face\s*\{.*?\}\s*", "", svg, flags=re.DOTALL)
+
+    # Force our local monospace stack even if Rich sets font-family to Fira Code.
+    override = f"\ntext {{ font-family: {SVG_MONO_FONT_STACK} !important; }}\n"
+    if "</style>" in svg:
+        svg = svg.replace("</style>", override + "</style>", 1)
+    else:
+        svg = svg.replace("<svg ", f"<svg><style>{override}</style> ", 1)
+
+    return svg
 
 
 def _apply_carriage_returns(text: str) -> list[str]:
@@ -529,6 +552,7 @@ class LocalServer:
                 )
 
             svg = await asyncio.to_thread(_render_svg)
+            svg = _rewrite_svg_fonts(svg)
             etag = hashlib.sha1(svg.encode("utf-8"), usedforsecurity=False).hexdigest()
             self._screenshot_cache[route_key] = (asyncio.get_event_loop().time(), svg)
             self._screenshot_cache_etag[route_key] = etag
