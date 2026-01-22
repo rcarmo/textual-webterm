@@ -100,7 +100,6 @@ omit = [
     "*/tests/*",
     "*/__pycache__/*",
     # Integration-heavy modules that require running servers/processes
-    "*/local_server.py",
     "*/app_session.py",
     "*/terminal_session.py",
     "*/exit_poller.py",
@@ -116,5 +115,5 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "assert ",
 ]
-# Unit test coverage target - integration tests would add ~20% more
+# Unit test coverage target
 fail_under = 80
