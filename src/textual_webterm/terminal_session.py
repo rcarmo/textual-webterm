@@ -13,6 +13,7 @@ import termios
 from collections import deque
 from typing import TYPE_CHECKING
 
+import pyte
 import rich.repr
 from importlib_metadata import version
 
@@ -26,6 +27,10 @@ log = logging.getLogger("textual-web")
 
 # Maximum bytes to keep in replay buffer for reconnection
 REPLAY_BUFFER_SIZE = 64 * 1024  # 64KB
+
+# Default screen size for pyte emulator
+DEFAULT_SCREEN_WIDTH = 132
+DEFAULT_SCREEN_HEIGHT = 45
 
 
 @rich.repr.auto
@@ -47,6 +52,10 @@ class TerminalSession(Session):
         self._replay_buffer: deque[bytes] = deque()
         self._replay_buffer_size = 0
         self._replay_lock = asyncio.Lock()
+        # pyte screen for accurate terminal state tracking
+        self._screen = pyte.Screen(DEFAULT_SCREEN_WIDTH, DEFAULT_SCREEN_HEIGHT)
+        self._stream = pyte.Stream(self._screen)
+        self._screen_lock = asyncio.Lock()
         super().__init__()
 
     def __rich_repr__(self) -> rich.repr.Result:
@@ -55,6 +64,10 @@ class TerminalSession(Session):
 
     async def open(self, width: int = 80, height: int = 24) -> None:
         log.info("Opening terminal session %s with command: %s", self.session_id, self.command)
+        # Initialize pyte screen with the requested size
+        self._screen = pyte.Screen(width, height)
+        self._stream = pyte.Stream(self._screen)
+
         pid, master_fd = pty.fork()
         self.pid = pid
         self.master_fd = master_fd
@@ -88,6 +101,9 @@ class TerminalSession(Session):
     async def set_terminal_size(self, width: int, height: int) -> None:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._set_terminal_size, width, height)
+        # Resize pyte screen to match
+        async with self._screen_lock:
+            self._screen.resize(height, width)
 
     async def _add_to_replay_buffer(self, data: bytes) -> None:
         """Add data to replay buffer, maintaining size limit."""
@@ -98,10 +114,29 @@ class TerminalSession(Session):
                 old_data = self._replay_buffer.popleft()
                 self._replay_buffer_size -= len(old_data)
 
+    async def _update_screen(self, data: bytes) -> None:
+        """Update the pyte screen with new terminal data."""
+        async with self._screen_lock:
+            try:
+                text = data.decode("utf-8", errors="replace")
+                self._stream.feed(text)
+            except Exception:
+                # Don't let pyte errors crash the session
+                pass
+
     async def get_replay_buffer(self) -> bytes:
         """Get the contents of the replay buffer."""
         async with self._replay_lock:
             return b"".join(self._replay_buffer)
+
+    async def get_screen_lines(self) -> list[str]:
+        """Get the current screen state as a list of lines.
+
+        Returns properly rendered terminal content with all escape sequences
+        interpreted, suitable for screenshot generation.
+        """
+        async with self._screen_lock:
+            return [line.rstrip() for line in self._screen.display]
 
     def update_connector(self, connector: SessionConnector) -> None:
         """Update the connector for reconnection without restarting the session."""
@@ -127,6 +162,8 @@ class TerminalSession(Session):
                     break
                 # Store in replay buffer for reconnection
                 await self._add_to_replay_buffer(data)
+                # Update pyte screen state for screenshots
+                await self._update_screen(data)
                 # Send to current connector
                 if self._connector:
                     await self._connector.on_data(data)

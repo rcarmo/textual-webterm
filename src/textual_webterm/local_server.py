@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiohttp
-import pyte
 from aiohttp import WSMsgType, web
 from rich.ansi import AnsiDecoder
 from rich.console import Console
@@ -34,8 +33,6 @@ log = logging.getLogger("textual-web")
 
 DISCONNECT_RESIZE = (132, 45)
 
-# Avoid heavy screenshot rendering from processing unbounded output.
-SCREENSHOT_MAX_BYTES = 65536
 SCREENSHOT_CACHE_SECONDS = 1.0
 SCREENSHOT_MAX_CACHE_SECONDS = 60.0
 
@@ -106,19 +103,6 @@ def _rewrite_svg_fonts(svg: str) -> str:
         svg = svg.replace("<svg ", f"<svg><style>{override}</style> ", 1)
 
     return svg
-
-
-def _apply_carriage_returns(text: str, width: int = 80, height: int = 24) -> list[str]:
-    """Use pyte terminal emulator to properly interpret ANSI escape sequences.
-
-    This handles cursor positioning, screen clearing, and other terminal control
-    codes that cause issues like tmux status bars "creeping up" in screenshots.
-    """
-    screen = pyte.Screen(width, height)
-    stream = pyte.Stream(screen)
-    stream.feed(text)
-    # Return lines from the display, stripping trailing whitespace
-    return [line.rstrip() for line in screen.display]
 
 
 class LocalServer:
@@ -473,7 +457,7 @@ class LocalServer:
             )
             session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
 
-        if session_process is None or not hasattr(session_process, "get_replay_buffer"):
+        if session_process is None or not hasattr(session_process, "get_screen_lines"):
             raise web.HTTPNotFound(text="Session not found")
 
         # If nothing has changed since the last render, serve cached screenshot without
@@ -485,10 +469,10 @@ class LocalServer:
             if cached_response is not None:
                 return cached_response
 
-        replay_data = await session_process.get_replay_buffer()  # type: ignore[func-returns-value]
-        if len(replay_data) > SCREENSHOT_MAX_BYTES:
-            replay_data = replay_data[-SCREENSHOT_MAX_BYTES:]
-        ansi_text = replay_data.decode("utf-8", errors="replace")
+        # Get screen lines directly from the terminal session's pyte screen
+        # This provides accurate terminal state without replay buffer truncation issues
+        lines = await session_process.get_screen_lines()  # type: ignore[union-attr]
+        screen_text = "\n".join(lines)
 
         try:
             width = int(request.query.get("width", "120"))
@@ -501,10 +485,6 @@ class LocalServer:
         except ValueError:
             height = DISCONNECT_RESIZE[1]
         height = max(5, min(200, height))
-
-        # Use pyte terminal emulator to get clean screen state
-        lines = _apply_carriage_returns(ansi_text, width, height)
-        ansi_text = "\n".join(lines)
 
         now = asyncio.get_event_loop().time()
         ttl = self._get_screenshot_cache_ttl(route_key, now)
@@ -539,7 +519,7 @@ class LocalServer:
             def _render_svg() -> str:
                 console = Console(record=True, width=width, height=height, file=io.StringIO())
                 decoder = AnsiDecoder()
-                for renderable in decoder.decode(ansi_text):
+                for renderable in decoder.decode(screen_text):
                     console.print(renderable)
 
                 return console.export_svg(

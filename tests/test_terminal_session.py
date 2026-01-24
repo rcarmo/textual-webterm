@@ -96,6 +96,40 @@ class TestTerminalSession:
         # Buffer should be trimmed
         assert session._replay_buffer_size <= REPLAY_BUFFER_SIZE + chunk_size
 
+    @pytest.mark.asyncio
+    async def test_screen_state_updates_with_data(self):
+        """Test that pyte screen updates when data is received."""
+        from textual_webterm.terminal_session import TerminalSession
+
+        mock_poller = MagicMock()
+        session = TerminalSession(mock_poller, "test-session", "bash")
+
+        # Feed some terminal data
+        await session._update_screen(b"Hello World\r\n")
+        lines = await session.get_screen_lines()
+
+        # First line should contain the text
+        assert "Hello World" in lines[0]
+
+    @pytest.mark.asyncio
+    async def test_screen_handles_cursor_positioning(self):
+        """Test that pyte screen correctly handles cursor positioning (tmux-style)."""
+        from textual_webterm.terminal_session import TerminalSession
+
+        mock_poller = MagicMock()
+        session = TerminalSession(mock_poller, "test-session", "bash")
+
+        # Feed content then reposition cursor and overwrite
+        await session._update_screen(b"Line 1\r\nLine 2\r\nLine 3\r\n")
+        # Move cursor to line 2, column 1 and clear line, then write new content
+        await session._update_screen(b"\x1b[2;1H\x1b[KUpdated Line 2")
+
+        lines = await session.get_screen_lines()
+
+        assert lines[0] == "Line 1"
+        assert lines[1] == "Updated Line 2"
+        assert lines[2] == "Line 3"
+
     def test_update_connector(self):
         """Test updating connector."""
         from textual_webterm.terminal_session import TerminalSession

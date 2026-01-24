@@ -9,7 +9,6 @@ from textual_webterm.config import App, Config
 from textual_webterm.local_server import (
     LocalClientConnector,
     LocalServer,
-    _apply_carriage_returns,
     _rewrite_svg_fonts,
 )
 
@@ -110,26 +109,6 @@ class TestLocalServer:
 class TestLocalServerHelpers:
     """Tests for LocalServer helper methods."""
 
-    def test_apply_carriage_returns_overwrites_line(self):
-        text = "hello\rworld\r\nnext"
-        # pyte terminal emulator interprets CR properly - overwrites hello with world
-        lines = _apply_carriage_returns(text, width=80, height=24)
-        # First line should have "world" (overwritten), second line "next"
-        assert lines[0] == "world"
-        assert lines[1] == "next"
-
-    def test_apply_carriage_returns_handles_cursor_positioning(self):
-        # Simulate tmux-style cursor positioning to row 5, column 1 (\x1b[5;1H)
-        # Then clear to end of line (\x1b[K) and write new content
-        # Use \r\n for proper line endings
-        text = "line1\r\nline2\r\nline3\r\nline4\r\nline5\x1b[5;1H\x1b[Kupdated"
-        lines = _apply_carriage_returns(text, width=80, height=10)
-        # Line 5 (index 4) should be overwritten with "updated"
-        assert lines[4] == "updated"
-        # Previous lines should remain
-        assert lines[0] == "line1"
-        assert lines[1] == "line2"
-
     @pytest.mark.asyncio
     async def test_keyboard_interrupt_closes_sessions_and_websockets(self, server, monkeypatch):
         ws1 = MagicMock()
@@ -215,7 +194,7 @@ class TestLocalServerHelpers:
         request.query = {"route_key": "rk", "width": "80"}
 
         session = MagicMock()
-        session.get_replay_buffer = AsyncMock(return_value=b"hello\r\n")
+        session.get_screen_lines = AsyncMock(return_value=["hello", ""])
 
         monkeypatch.setattr(server.session_manager, "get_session_by_route_key", lambda _rk: session)
 
@@ -233,7 +212,7 @@ class TestLocalServerHelpers:
         request.query = {"route_key": "known", "width": "90"}
 
         session = MagicMock()
-        session.get_replay_buffer = AsyncMock(return_value=b"world\r\n")
+        session.get_screen_lines = AsyncMock(return_value=["world", ""])
 
         # Pretend app exists for slug "known"
         server.session_manager.apps_by_slug["known"] = App(
@@ -565,7 +544,7 @@ class TestLocalServerMoreCoverage:
         request.headers = {}
 
         session = MagicMock()
-        session.get_replay_buffer = AsyncMock(return_value=b"SHOULD_NOT_BE_READ")
+        session.get_screen_lines = AsyncMock(return_value=["SHOULD_NOT_BE_READ"])
         monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
 
         server_with_no_apps._screenshot_cache["rk"] = (0.0, "<svg>cached</svg>")
@@ -575,7 +554,7 @@ class TestLocalServerMoreCoverage:
 
         resp = await server_with_no_apps._handle_screenshot(request)
         assert "cached" in resp.text
-        session.get_replay_buffer.assert_not_awaited()
+        session.get_screen_lines.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_handle_screenshot_invalid_width_height_defaults(self, server_with_no_apps, monkeypatch):
@@ -584,7 +563,7 @@ class TestLocalServerMoreCoverage:
         request.headers = {}
 
         session = MagicMock()
-        session.get_replay_buffer = AsyncMock(return_value=b"hello\n")
+        session.get_screen_lines = AsyncMock(return_value=["hello", ""])
         monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
 
         resp = await server_with_no_apps._handle_screenshot(request)
@@ -756,32 +735,19 @@ class TestLocalServerMoreCoverage:
         assert created is True
 
     @pytest.mark.asyncio
-    async def test_handle_screenshot_truncates_replay_buffer_before_decode(self, server_with_no_apps, monkeypatch):
-        from textual_webterm.local_server import SCREENSHOT_MAX_BYTES
-
+    async def test_handle_screenshot_uses_get_screen_lines(self, server_with_no_apps, monkeypatch):
+        """Test that screenshot uses get_screen_lines() from terminal session."""
         request = MagicMock()
         request.query = {"route_key": "rk"}
         request.headers = {}
 
         session = MagicMock()
-        session.get_replay_buffer = AsyncMock(return_value=b"x" * (SCREENSHOT_MAX_BYTES + 10))
+        session.get_screen_lines = AsyncMock(return_value=["line1", "line2", ""])
         monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
 
         server_with_no_apps._route_last_activity["rk"] = 1.0
 
-        captured = {"len": None}
-
-        def apply_cr(text: str, width: int = 80, height: int = 24):
-            captured["len"] = len(text)
-            return ["x"]
-
-        async def fake_to_thread(_fn):
-            return "<svg></svg>"
-
-        monkeypatch.setattr("textual_webterm.local_server._apply_carriage_returns", apply_cr)
-        monkeypatch.setattr("textual_webterm.local_server.asyncio.to_thread", AsyncMock(side_effect=fake_to_thread))
-        monkeypatch.setattr("textual_webterm.local_server._rewrite_svg_fonts", lambda s: s)
-
         resp = await server_with_no_apps._handle_screenshot(request)
         assert resp.content_type == "image/svg+xml"
-        assert captured["len"] == SCREENSHOT_MAX_BYTES
+        assert "<svg" in resp.text
+        session.get_screen_lines.assert_awaited_once()
