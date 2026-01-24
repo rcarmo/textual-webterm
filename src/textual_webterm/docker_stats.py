@@ -65,37 +65,65 @@ class DockerStatsCollector:
                     chunks.append(chunk)
                 sock.close()
                 return b"".join(chunks)
-            except (OSError, TimeoutError):
+            except (OSError, TimeoutError) as e:
+                log.debug("Socket error for %s: %s", path, e)
                 return None
 
         response = await loop.run_in_executor(None, _sync_request)
         if response is None:
+            log.debug("No response from Docker socket for %s", path)
             return None
 
-        # Parse HTTP response - find JSON body after headers
+        return self._parse_docker_response(path, response)
+
+    def _parse_docker_response(self, path: str, response: bytes) -> dict | list | None:
+        """Parse HTTP response from Docker socket."""
         try:
             response_str = response.decode("utf-8", errors="replace")
             # Split headers and body
-            if "\r\n\r\n" in response_str:
-                _, body = response_str.split("\r\n\r\n", 1)
-            else:
-                body = response_str
+            if "\r\n\r\n" not in response_str:
+                log.debug("No header separator in response for %s", path)
+                return None
 
-            # Handle chunked encoding - find the JSON object/array
+            _, body = response_str.split("\r\n\r\n", 1)
+            body = body.strip()
+
+            # Try direct parse first
             if body.startswith("{") or body.startswith("["):
-                json_str = body
-            else:
-                # Skip chunk size line in chunked encoding
-                lines = body.split("\r\n")
-                for line in lines:
-                    if line.startswith("{") or line.startswith("["):
-                        json_str = line
-                        break
-                else:
-                    return None
+                first_line = body.split("\r\n")[0] if "\r\n" in body else body
+                return json.loads(first_line)
 
-            return json.loads(json_str)
-        except (json.JSONDecodeError, ValueError):
+            # Handle chunked transfer encoding
+            lines = body.split("\r\n")
+            for i, raw_line in enumerate(lines):
+                stripped = raw_line.strip()
+                if stripped.startswith("{") or stripped.startswith("["):
+                    result = self._try_parse_chunked_json(stripped, lines[i + 1:])
+                    if result is not None:
+                        return result
+
+            log.debug("Could not find JSON in response for %s, body preview: %s", path, body[:200] if body else "(empty)")
+            return None
+        except (json.JSONDecodeError, ValueError) as e:
+            log.debug("JSON parse error for %s: %s", path, e)
+            return None
+
+    def _try_parse_chunked_json(self, first_part: str, remaining_lines: list[str]) -> dict | list | None:
+        """Try to parse JSON that may be split across chunked encoding."""
+        try:
+            return json.loads(first_part)
+        except json.JSONDecodeError:
+            pass
+
+        # Try joining remaining lines (skip chunk size markers)
+        json_parts = [first_part]
+        for raw_line in remaining_lines:
+            part = raw_line.strip()
+            if part and not part.isalnum():  # Skip hex chunk sizes
+                json_parts.append(part)
+        try:
+            return json.loads("".join(json_parts))
+        except json.JSONDecodeError:
             return None
 
     async def _discover_containers(self, service_names: list[str]) -> dict[str, str]:
