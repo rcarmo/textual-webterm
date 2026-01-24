@@ -222,6 +222,13 @@ def render_terminal_svg(
             if classes:
                 attrs.append(f'class="{" ".join(classes)}"')
 
+            # For horizontal box-drawing spans, use textLength to ensure correct width
+            # This prevents gaps caused by font rendering of ─ being narrower than char_width
+            if _is_all_horizontal_box_drawing(text) and len(text) > 1:
+                span_width = columns * char_width
+                attrs.append(f'textLength="{span_width:.1f}"')
+                attrs.append('lengthAdjust="spacing"')
+
             parts.append(f'<tspan {" ".join(attrs)}>{_escape_xml(text)}</tspan>')
             x += columns * char_width
 
@@ -272,6 +279,23 @@ def _is_box_drawing_vertical_or_corner(char: str) -> bool:
         0x2574, 0x2576, 0x2578, 0x257A, 0x257C, 0x257E,  # partial horizontal
     }
     return code not in horizontal_chars
+
+
+# Set of horizontal box-drawing character codes for span detection
+_HORIZONTAL_BOX_CHARS = {
+    0x2500, 0x2501,  # ─ ━
+    0x2504, 0x2505,  # ┄ ┅ (horizontal dashed)
+    0x2508, 0x2509,  # ┈ ┉ (horizontal dashed)
+    0x254C, 0x254D,  # ╌ ╍ (horizontal dashed)
+    0x2550,          # ═
+}
+
+
+def _is_all_horizontal_box_drawing(text: str) -> bool:
+    """Check if text consists entirely of horizontal box-drawing characters."""
+    if not text:
+        return False
+    return all(ord(c) in _HORIZONTAL_BOX_CHARS for c in text)
 
 
 def _should_break_span(current_text: str, new_char: str) -> bool:
