@@ -216,11 +216,6 @@ def render_terminal_svg(
             # Build tspan attributes
             attrs = [f'x="{x:.1f}"']
 
-            # Use textLength to enforce exact character spacing for alignment
-            span_width = columns * char_width
-            attrs.append(f'textLength="{span_width:.1f}"')
-            attrs.append('lengthAdjust="spacingAndGlyphs"')
-
             # Foreground color
             if span["fg"] != foreground:
                 attrs.append(f'fill="{span["fg"]}"')
