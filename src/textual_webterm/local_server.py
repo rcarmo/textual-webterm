@@ -718,7 +718,8 @@ class LocalServer:
             card.appendChild(body);
             card.appendChild(meta);
             card.onclick = () => {{
-                window.open(`/?route_key=${{encodeURIComponent(tile.slug)}}`, '_blank');
+                // Use tile slug as window name to reuse the same tab for each tile
+                window.open(`/?route_key=${{encodeURIComponent(tile.slug)}}`, `webterm-${{tile.slug}}`);
             }};
             card.img = img;
             return card;
