@@ -347,8 +347,14 @@ class LocalServer:
             if self._compose_mode and self._landing_apps:
                 self._docker_stats = DockerStatsCollector()
                 if self._docker_stats.available:
-                    containers = [app.slug for app in self._landing_apps]
-                    self._docker_stats.start(containers)
+                    # Pass service names (not slugs) for Docker matching
+                    # Also pass slug->name mapping so we can look up by slug
+                    service_names = [app.name for app in self._landing_apps]
+                    self._docker_stats.start(service_names)
+                    # Create slug->name mapping for lookups
+                    self._slug_to_service: dict[str, str] = {
+                        app.slug: app.name for app in self._landing_apps
+                    }
                     stack.push_async_callback(self._docker_stats.stop)
 
             site = web.TCPSite(runner, self.host, self.port)
@@ -659,10 +665,12 @@ class LocalServer:
             height = 20
         height = max(10, min(100, height))
 
-        # Get CPU history
+        # Get CPU history - map slug to service name if needed
         values: list[float] = []
         if self._docker_stats:
-            values = self._docker_stats.get_cpu_history(container)
+            # Container param is slug, but stats are stored by service name
+            service_name = getattr(self, "_slug_to_service", {}).get(container, container)
+            values = self._docker_stats.get_cpu_history(service_name)
 
         svg = render_sparkline_svg(values, width=width, height=height)
         headers = {"Cache-Control": "no-cache, max-age=0"}

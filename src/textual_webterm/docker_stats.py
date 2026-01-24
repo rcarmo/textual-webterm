@@ -201,13 +201,18 @@ class DockerStatsCollector:
         refresh_counter = 0
 
         while self._running:
-            # Refresh container mapping every 30 iterations (~60 seconds)
+            # Refresh container mapping every 30 iterations (~5 minutes at 10s interval)
             if refresh_counter % 30 == 0:
                 service_to_container = await self._discover_containers(service_names)
                 if service_to_container:
                     log.debug(
                         "Discovered containers: %s",
                         ", ".join(f"{k}={v}" for k, v in service_to_container.items()),
+                    )
+                else:
+                    log.debug(
+                        "No containers found for services: %s",
+                        ", ".join(service_names),
                     )
 
             refresh_counter += 1
