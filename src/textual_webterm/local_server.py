@@ -228,6 +228,7 @@ class LocalServer:
 
         # Docker stats collector (only used in compose mode)
         self._docker_stats: DockerStatsCollector | None = None
+        self._slug_to_service: dict[str, str] = {}
 
     @property
     def app_count(self) -> int:
@@ -348,13 +349,13 @@ class LocalServer:
                 self._docker_stats = DockerStatsCollector()
                 if self._docker_stats.available:
                     # Pass service names (not slugs) for Docker matching
-                    # Also pass slug->name mapping so we can look up by slug
                     service_names = [app.name for app in self._landing_apps]
                     self._docker_stats.start(service_names)
                     # Create slug->name mapping for lookups
-                    self._slug_to_service: dict[str, str] = {
+                    self._slug_to_service = {
                         app.slug: app.name for app in self._landing_apps
                     }
+                    log.info("Slug to service mapping: %s", self._slug_to_service)
                     stack.push_async_callback(self._docker_stats.stop)
 
             site = web.TCPSite(runner, self.host, self.port)
@@ -672,8 +673,17 @@ class LocalServer:
         values: list[float] = []
         if self._docker_stats:
             # Container param is slug, but stats are stored by service name
-            service_name = getattr(self, "_slug_to_service", {}).get(container, container)
+            service_name = self._slug_to_service.get(container, container)
             values = self._docker_stats.get_cpu_history(service_name)
+            if not values:
+                log.debug(
+                    "No CPU history for container=%s service=%s (available=%s)",
+                    container,
+                    service_name,
+                    list(self._docker_stats._cpu_history.keys()),
+                )
+        else:
+            log.debug("Docker stats collector not available")
 
         svg = render_sparkline_svg(values, width=width, height=height)
         headers = {"Cache-Control": "no-cache, max-age=0"}
