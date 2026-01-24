@@ -201,6 +201,7 @@ class LocalServer:
         exit_on_idle: int = 0,
         landing_apps: list | None = None,
         compose_mode: bool = False,
+        compose_project: str | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -221,6 +222,7 @@ class LocalServer:
         self._websocket_connections: dict[RouteKey, web.WebSocketResponse] = {}
         self._landing_apps = landing_apps or []
         self._compose_mode = compose_mode
+        self._compose_project = compose_project
 
         self._screenshot_cache: dict[str, tuple[float, str]] = {}
         self._screenshot_cache_etag: dict[str, str] = {}
@@ -332,13 +334,14 @@ class LocalServer:
         return routes
 
     async def _shutdown(self) -> None:
-        try:
-            for ws in list(self._websocket_connections.values()):
-                with contextlib.suppress(Exception):
-                    await ws.close()
+        # Set exit event first so main loop exits immediately
+        self.exit_event.set()
+        # Then clean up resources (best effort, don't block exit)
+        for ws in list(self._websocket_connections.values()):
+            with contextlib.suppress(Exception):
+                await ws.close()
+        with contextlib.suppress(Exception):
             await self.session_manager.close_all()
-        finally:
-            self.exit_event.set()
 
     async def _run_local_server(self) -> None:
         app = web.Application()
@@ -351,7 +354,9 @@ class LocalServer:
 
             # Start Docker stats collector in compose mode
             if self._compose_mode and self._landing_apps:
-                self._docker_stats = DockerStatsCollector()
+                self._docker_stats = DockerStatsCollector(
+                    compose_project=self._compose_project
+                )
                 if self._docker_stats.available:
                     # Pass service names (not slugs) for Docker matching
                     service_names = [app.name for app in self._landing_apps]

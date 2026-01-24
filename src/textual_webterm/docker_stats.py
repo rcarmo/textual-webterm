@@ -9,13 +9,30 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import socket
 from collections import deque
 from pathlib import Path
 
 log = logging.getLogger("textual-webterm")
 
-DOCKER_SOCKET = "/var/run/docker.sock"
+DEFAULT_DOCKER_SOCKET = "/var/run/docker.sock"
+
+
+def get_docker_socket_path() -> str:
+    """Get Docker socket path from DOCKER_HOST env var or default.
+
+    Supports unix:// scheme or plain path in DOCKER_HOST.
+    """
+    docker_host = os.environ.get("DOCKER_HOST", "")
+    if docker_host:
+        if docker_host.startswith("unix://"):
+            return docker_host[7:]  # Strip unix:// prefix
+        if docker_host.startswith("/"):
+            return docker_host
+    return DEFAULT_DOCKER_SOCKET
+
+
 STATS_HISTORY_SIZE = 180  # Number of CPU readings to keep (30 min at 10s interval)
 POLL_INTERVAL = 10.0  # Seconds between polls
 
@@ -23,8 +40,11 @@ POLL_INTERVAL = 10.0  # Seconds between polls
 class DockerStatsCollector:
     """Collects CPU stats from Docker containers via the Docker socket."""
 
-    def __init__(self, socket_path: str = DOCKER_SOCKET) -> None:
-        self._socket_path = socket_path
+    def __init__(
+        self, socket_path: str | None = None, compose_project: str | None = None
+    ) -> None:
+        self._socket_path = socket_path or get_docker_socket_path()
+        self._compose_project = compose_project
         # container_name -> deque of CPU % values (0-100)
         self._cpu_history: dict[str, deque[float]] = {}
         self._running = False
@@ -34,8 +54,20 @@ class DockerStatsCollector:
 
     @property
     def available(self) -> bool:
-        """Check if Docker socket is available."""
-        return Path(self._socket_path).exists()
+        """Check if Docker socket is available and accessible."""
+        path = Path(self._socket_path)
+        if not path.exists():
+            return False
+        # Also check we can actually connect
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            sock.connect(self._socket_path)
+            sock.close()
+            return True
+        except (OSError, TimeoutError) as e:
+            log.warning("Docker socket exists but not accessible: %s", e)
+            return False
 
     def get_cpu_history(self, container_name: str) -> list[float]:
         """Get CPU history for a container."""
@@ -129,6 +161,12 @@ class DockerStatsCollector:
             names = container.get("Names", [])
             labels = container.get("Labels", {})
 
+            # Filter by compose project if specified
+            if self._compose_project:
+                project = labels.get("com.docker.compose.project", "")
+                if project != self._compose_project:
+                    continue
+
             # Check compose service label
             service = labels.get("com.docker.compose.service", "")
             if service in service_names:
@@ -146,7 +184,7 @@ class DockerStatsCollector:
                         break
 
         if mapping:
-            log.debug("Discovered %d containers for stats", len(mapping))
+            log.debug("Discovered %d containers for stats (project=%s)", len(mapping), self._compose_project)
 
         return mapping
 
@@ -236,8 +274,8 @@ class DockerStatsCollector:
                     continue
                 try:
                     await self._poll_container(service_name, container_id)
-                except Exception:
-                    log.debug("Error polling stats for %s", service_name)
+                except Exception as e:
+                    log.debug("Error polling stats for %s: %s", service_name, e)
 
             await asyncio.sleep(POLL_INTERVAL)
 

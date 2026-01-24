@@ -150,11 +150,14 @@ def app(
 
     landing_apps: list = []
     is_compose_mode = False
+    compose_project: str | None = None
     if landing_manifest:
         landing_apps = load_landing_yaml(landing_manifest)
     elif compose_manifest:
         landing_apps = load_compose_manifest(compose_manifest)
         is_compose_mode = True
+        # Derive compose project name from directory (same as docker-compose default)
+        compose_project = compose_manifest.parent.name
 
     server = LocalServer(
         "./",
@@ -163,6 +166,7 @@ def app(
         port=port,
         landing_apps=landing_apps,
         compose_mode=is_compose_mode,
+        compose_project=compose_project,
     )
     for app_entry in landing_apps:
         server.add_terminal(app_entry.name, app_entry.command, slug=app_entry.slug)
