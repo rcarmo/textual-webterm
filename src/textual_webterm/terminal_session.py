@@ -117,12 +117,16 @@ class TerminalSession(Session):
             self._screen.resize(height, width)
 
     async def force_redraw(self) -> None:
-        """Force a terminal redraw by re-sending the current size.
+        """Force a terminal redraw by toggling the size.
 
-        This triggers a SIGWINCH to the child process, causing applications
-        like tmux to redraw their display.
+        Briefly changes the terminal size then restores it, which forces
+        applications like tmux to fully redraw all panes.
         """
         loop = asyncio.get_running_loop()
+        # Briefly shrink by 1 column then restore - this forces a full redraw
+        await loop.run_in_executor(
+            None, self._set_terminal_size, self._last_width - 1, self._last_height
+        )
         await loop.run_in_executor(
             None, self._set_terminal_size, self._last_width, self._last_height
         )
