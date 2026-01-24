@@ -1,2 +1,3 @@
 - [x] Set tab title to the container name
 - [x] screenshots are still showing the tmux bar creeping up and slowly taking over the screenshot
+  - Fixed by maintaining pyte Screen state in TerminalSession, updated as data flows
