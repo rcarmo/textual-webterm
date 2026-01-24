@@ -146,6 +146,8 @@ def render_terminal_svg(
         f"font-size: {font_size}px; "
         f"fill: {foreground}; "
         f"white-space: pre; "
+        f"dominant-baseline: text-before-edge; "
+        f"text-rendering: optimizeLegibility; "
         f"}}"
         f".bold {{ font-weight: bold; }}"
         f".italic {{ font-style: italic; }}"
@@ -164,7 +166,8 @@ def render_terminal_svg(
 
     # Render each row
     for row_idx, row_data in enumerate(screen_buffer):
-        y = 10 + (row_idx + 1) * actual_line_height - (actual_line_height - font_size) / 2
+        # With dominant-baseline: text-before-edge, text top aligns to y
+        y = 10 + row_idx * actual_line_height
 
         # Build spans for this row, grouping consecutive chars with same style
         spans = _build_row_spans(row_data, foreground, background)
@@ -178,24 +181,16 @@ def render_terminal_svg(
 
         x = 10.0  # Starting x position with padding
         for span in spans:
-            text = span["text"]
             columns = span["columns"]
 
             # Background needs a separate rect (collected before text)
             if span["has_bg"] and span["bg"] != background:
                 bg_width = columns * char_width
-                bg_y = y - font_size + 2
                 row_bg_rects.append(
-                    f'<rect x="{x:.1f}" y="{bg_y:.1f}" '
+                    f'<rect x="{x:.1f}" y="{y:.1f}" '
                     f'width="{bg_width:.1f}" height="{actual_line_height:.1f}" '
                     f'fill="{span["bg"]}"/>'
                 )
-
-            if not text:
-                # Skip truly empty spans (wide char placeholders already counted)
-                x += columns * char_width
-                continue
-
             x += columns * char_width
 
         # Add background rects first
@@ -208,10 +203,6 @@ def render_terminal_svg(
         for span in spans:
             text = span["text"]
             columns = span["columns"]
-            if not text:
-                # Skip truly empty spans
-                x += columns * char_width
-                continue
 
             # Build tspan attributes
             attrs = [f'x="{x:.1f}"']

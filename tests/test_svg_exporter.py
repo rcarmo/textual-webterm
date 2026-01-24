@@ -10,6 +10,8 @@ from textual_webterm.svg_exporter import (
     _build_row_spans,
     _color_to_hex,
     _escape_xml,
+    _is_box_drawing_vertical_or_corner,
+    _should_break_span,
     render_terminal_svg,
 )
 
@@ -330,7 +332,61 @@ class TestBuildRowSpans:
         assert spans[1]["columns"] == 1
 
 
-class TestRenderTerminalSvg:
+class TestBoxDrawingHelpers:
+    """Tests for box drawing character detection helpers."""
+
+    def test_is_box_drawing_empty_char(self) -> None:
+        """Empty string returns False."""
+        assert _is_box_drawing_vertical_or_corner("") is False
+
+    def test_is_box_drawing_regular_char(self) -> None:
+        """Regular ASCII characters return False."""
+        assert _is_box_drawing_vertical_or_corner("A") is False
+        assert _is_box_drawing_vertical_or_corner(" ") is False
+        assert _is_box_drawing_vertical_or_corner("1") is False
+
+    def test_is_box_drawing_horizontal_lines(self) -> None:
+        """Horizontal box drawing lines return False (can merge)."""
+        assert _is_box_drawing_vertical_or_corner("─") is False  # U+2500
+        assert _is_box_drawing_vertical_or_corner("━") is False  # U+2501
+        assert _is_box_drawing_vertical_or_corner("═") is False  # U+2550
+
+    def test_is_box_drawing_vertical_lines(self) -> None:
+        """Vertical box drawing lines return True (need precise positioning)."""
+        assert _is_box_drawing_vertical_or_corner("│") is True  # U+2502
+        assert _is_box_drawing_vertical_or_corner("┃") is True  # U+2503
+        assert _is_box_drawing_vertical_or_corner("║") is True  # U+2551
+
+    def test_is_box_drawing_corners(self) -> None:
+        """Corner box drawing characters return True."""
+        assert _is_box_drawing_vertical_or_corner("┌") is True
+        assert _is_box_drawing_vertical_or_corner("┐") is True
+        assert _is_box_drawing_vertical_or_corner("└") is True
+        assert _is_box_drawing_vertical_or_corner("┘") is True
+        assert _is_box_drawing_vertical_or_corner("╭") is True
+        assert _is_box_drawing_vertical_or_corner("╮") is True
+        assert _is_box_drawing_vertical_or_corner("╯") is True
+        assert _is_box_drawing_vertical_or_corner("╰") is True
+
+    def test_should_break_span_empty_current(self) -> None:
+        """Empty current text never breaks."""
+        assert _should_break_span("", "A") is False
+        assert _should_break_span("", "│") is False
+
+    def test_should_break_span_normal_chars(self) -> None:
+        """Normal characters don't break spans."""
+        assert _should_break_span("A", "B") is False
+        assert _should_break_span("Hello", "!") is False
+
+    def test_should_break_span_vertical_line(self) -> None:
+        """Vertical lines cause breaks."""
+        assert _should_break_span("A", "│") is True
+        assert _should_break_span("│", "A") is True
+
+    def test_should_break_span_horizontal_lines_merge(self) -> None:
+        """Horizontal lines can merge with each other."""
+        assert _should_break_span("─", "─") is False
+        assert _should_break_span("━", "━") is False
     """Tests for render_terminal_svg function."""
 
     def _char(
@@ -364,6 +420,19 @@ class TestRenderTerminalSvg:
         assert svg.startswith("<svg")
         assert svg.endswith("</svg>")
         assert 'xmlns="http://www.w3.org/2000/svg"' in svg
+
+    def test_css_properties(self) -> None:
+        """SVG includes essential CSS properties for proper rendering."""
+        svg = render_terminal_svg([], width=80, height=24)
+        # Check for proper baseline alignment
+        assert "dominant-baseline: text-before-edge" in svg
+        # Check for legibility optimization
+        assert "text-rendering: optimizeLegibility" in svg
+        # Check for monospace font
+        assert "font-family:" in svg
+        assert "monospace" in svg
+        # Check for pre whitespace handling
+        assert "white-space: pre" in svg
 
     def test_buffer_with_empty_rows(self) -> None:
         """Buffer with rows containing only empty cells produces valid SVG."""
