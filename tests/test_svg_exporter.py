@@ -10,8 +10,8 @@ from textual_webterm.svg_exporter import (
     _build_row_spans,
     _color_to_hex,
     _escape_xml,
-    _is_all_horizontal_box_drawing,
     _is_box_drawing_vertical_or_corner,
+    _is_mostly_horizontal_box_drawing,
     _should_break_span,
     render_terminal_svg,
 )
@@ -389,26 +389,33 @@ class TestBoxDrawingHelpers:
         assert _should_break_span("─", "─") is False
         assert _should_break_span("━", "━") is False
 
-    def test_is_all_horizontal_box_drawing_empty(self) -> None:
+    def test_is_mostly_horizontal_box_drawing_empty(self) -> None:
         """Empty string returns False."""
-        assert _is_all_horizontal_box_drawing("") is False
+        assert _is_mostly_horizontal_box_drawing("") is False
 
-    def test_is_all_horizontal_box_drawing_normal_text(self) -> None:
+    def test_is_mostly_horizontal_box_drawing_normal_text(self) -> None:
         """Normal text returns False."""
-        assert _is_all_horizontal_box_drawing("Hello") is False
-        assert _is_all_horizontal_box_drawing("ABC") is False
+        assert _is_mostly_horizontal_box_drawing("Hello") is False
+        assert _is_mostly_horizontal_box_drawing("ABC") is False
 
-    def test_is_all_horizontal_box_drawing_horizontal_lines(self) -> None:
+    def test_is_mostly_horizontal_box_drawing_horizontal_lines(self) -> None:
         """Horizontal box chars return True."""
-        assert _is_all_horizontal_box_drawing("─") is True
-        assert _is_all_horizontal_box_drawing("───") is True
-        assert _is_all_horizontal_box_drawing("━━━") is True
-        assert _is_all_horizontal_box_drawing("═══") is True
+        assert _is_mostly_horizontal_box_drawing("─") is True
+        assert _is_mostly_horizontal_box_drawing("───") is True
+        assert _is_mostly_horizontal_box_drawing("━━━") is True
+        assert _is_mostly_horizontal_box_drawing("═══") is True
 
-    def test_is_all_horizontal_box_drawing_mixed(self) -> None:
-        """Mixed content returns False."""
-        assert _is_all_horizontal_box_drawing("─A─") is False
-        assert _is_all_horizontal_box_drawing("│──") is False  # vertical at start
+    def test_is_mostly_horizontal_box_drawing_with_corruption(self) -> None:
+        """Mostly horizontal with some corrupted chars returns True."""
+        # 90% horizontal (9 out of 10)
+        assert _is_mostly_horizontal_box_drawing("─────────X") is True
+        # With replacement chars (like U+FFFD)
+        assert _is_mostly_horizontal_box_drawing("───\ufffd───") is True
+
+    def test_is_mostly_horizontal_box_drawing_mixed(self) -> None:
+        """Mixed content below threshold returns False."""
+        assert _is_mostly_horizontal_box_drawing("─A─") is False  # 66% horizontal
+        assert _is_mostly_horizontal_box_drawing("│──") is False  # vertical at start
 
 
 class TestRenderTerminalSvg:

@@ -224,7 +224,8 @@ def render_terminal_svg(
 
             # For horizontal box-drawing spans, use textLength to ensure correct width
             # This prevents gaps caused by font rendering of ─ being narrower than char_width
-            if _is_all_horizontal_box_drawing(text) and len(text) > 1:
+            # Use "mostly" check to handle occasional corrupted chars (like U+FFFD)
+            if _is_mostly_horizontal_box_drawing(text) and len(text) > 1:
                 span_width = columns * char_width
                 attrs.append(f'textLength="{span_width:.1f}"')
                 attrs.append('lengthAdjust="spacing"')
@@ -291,11 +292,17 @@ _HORIZONTAL_BOX_CHARS = {
 }
 
 
-def _is_all_horizontal_box_drawing(text: str) -> bool:
-    """Check if text consists entirely of horizontal box-drawing characters."""
+def _is_mostly_horizontal_box_drawing(text: str, threshold: float = 0.8) -> bool:
+    """Check if text is mostly horizontal box-drawing characters.
+
+    Returns True if at least threshold (default 80%) of chars are horizontal
+    box-drawing chars. This handles cases where terminal data has occasional
+    corrupted chars (like replacement char U+FFFD) mixed in.
+    """
     if not text:
         return False
-    return all(ord(c) in _HORIZONTAL_BOX_CHARS for c in text)
+    horizontal_count = sum(1 for c in text if ord(c) in _HORIZONTAL_BOX_CHARS)
+    return horizontal_count / len(text) >= threshold
 
 
 def _should_break_span(current_text: str, new_char: str) -> bool:
