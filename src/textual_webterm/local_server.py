@@ -298,8 +298,10 @@ class LocalServer:
         app.add_routes(self._build_routes())
 
         runner = web.AppRunner(app)
-        try:
+        async with contextlib.AsyncExitStack() as stack:
             await runner.setup()
+            stack.push_async_callback(runner.cleanup)
+
             site = web.TCPSite(runner, self.host, self.port)
             await site.start()
 
@@ -307,8 +309,6 @@ class LocalServer:
             log.info("Available apps: %s", ", ".join(app.name for app in self.session_manager.apps))
 
             await self.exit_event.wait()
-        finally:
-            await runner.cleanup()
 
     async def _dispatch_ws_message(
         self,
