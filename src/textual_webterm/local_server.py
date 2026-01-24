@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiohttp
-import pyte
 from aiohttp import WSMsgType, web
 from rich.console import Console
 from rich.style import Style
@@ -471,7 +470,7 @@ class LocalServer:
             )
             session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
 
-        if session_process is None or not hasattr(session_process, "get_screen_lines"):
+        if session_process is None or not hasattr(session_process, "get_screen_state"):
             raise web.HTTPNotFound(text="Session not found")
 
         # If nothing has changed since the last render, serve cached screenshot without
@@ -483,29 +482,9 @@ class LocalServer:
             if cached_response is not None:
                 return cached_response
 
-        try:
-            width = int(request.query.get("width", "120"))
-        except ValueError:
-            width = 120
-        width = max(10, min(400, width))
-
-        try:
-            height = int(request.query.get("height", str(DISCONNECT_RESIZE[1])))
-        except ValueError:
-            height = DISCONNECT_RESIZE[1]
-        height = max(5, min(200, height))
-
-        # Hybrid approach for colored screenshots:
-        # 1. Get screen dimensions from pyte (accurate viewport)
-        # 2. Get raw ANSI from replay buffer for colors
-        # 3. Use pyte to interpret the ANSI and get proper screen state
-        # 4. Render through Rich for SVG with colors
-        replay_data = await session_process.get_replay_buffer()  # type: ignore[union-attr]
-        # Limit replay data to prevent excessive processing
-        max_replay = 128 * 1024  # 128KB should be plenty for a screen
-        if len(replay_data) > max_replay:
-            replay_data = replay_data[-max_replay:]
-        ansi_text = replay_data.decode("utf-8", errors="replace")
+        # Get the actual screen state from the terminal session's pyte screen
+        # This uses the correct dimensions that match what the terminal is rendering
+        screen_width, screen_height, screen_buffer = await session_process.get_screen_state()  # type: ignore[union-attr]
 
         now = asyncio.get_event_loop().time()
         ttl = self._get_screenshot_cache_ttl(route_key, now)
@@ -538,34 +517,31 @@ class LocalServer:
                     return cached_response
 
             def _render_svg() -> str:
-                # Use pyte to interpret ANSI sequences and get accurate screen state
-                screen = pyte.Screen(width, height)
-                stream = pyte.Stream(screen)
-                stream.feed(ansi_text)
+                # Use the session's screen buffer directly - this has the correct
+                # dimensions matching the actual terminal, preventing wrapping issues
+                console = Console(
+                    record=True, width=screen_width, height=screen_height, file=io.StringIO()
+                )
 
-                # Convert pyte screen buffer to Rich Text with colors
-                console = Console(record=True, width=width, height=height, file=io.StringIO())
-
-                for row in range(height):
+                for row_data in screen_buffer:
                     line = Text()
-                    for col in range(width):
-                        char = screen.buffer[row][col]
-                        char_data = char.data if char.data else " "
+                    for char in row_data:
+                        char_data = char["data"]
 
                         # Build Rich style from pyte character attributes
                         # Map pyte color names to Rich-compatible names
                         style_kwargs = {}
-                        if char.fg != "default":
-                            style_kwargs["color"] = PYTE_TO_RICH_COLOR.get(char.fg, char.fg)
-                        if char.bg != "default":
-                            style_kwargs["bgcolor"] = PYTE_TO_RICH_COLOR.get(char.bg, char.bg)
-                        if char.bold:
+                        if char["fg"] != "default":
+                            style_kwargs["color"] = PYTE_TO_RICH_COLOR.get(char["fg"], char["fg"])
+                        if char["bg"] != "default":
+                            style_kwargs["bgcolor"] = PYTE_TO_RICH_COLOR.get(char["bg"], char["bg"])
+                        if char["bold"]:
                             style_kwargs["bold"] = True
-                        if char.italics:
+                        if char["italics"]:
                             style_kwargs["italic"] = True
-                        if char.underscore:
+                        if char["underscore"]:
                             style_kwargs["underline"] = True
-                        if char.reverse:
+                        if char["reverse"]:
                             style_kwargs["reverse"] = True
 
                         if style_kwargs:

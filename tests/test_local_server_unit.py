@@ -191,11 +191,15 @@ class TestLocalServerHelpers:
     @pytest.mark.asyncio
     async def test_screenshot_svg_handler_returns_svg(self, server, monkeypatch, capsys):
         request = MagicMock()
-        request.query = {"route_key": "rk", "width": "80"}
+        request.query = {"route_key": "rk"}
 
+        # Mock screen state: width=80, height=2, buffer with "hello" on first line
+        screen_buffer = [
+            [{"data": c, "fg": "default", "bg": "default", "bold": False, "italics": False, "underscore": False, "reverse": False} for c in "hello" + " " * 75],
+            [{"data": " ", "fg": "default", "bg": "default", "bold": False, "italics": False, "underscore": False, "reverse": False}] * 80,
+        ]
         session = MagicMock()
-        session.get_screen_lines = AsyncMock(return_value=["hello", ""])
-        session.get_replay_buffer = AsyncMock(return_value=b"hello\r\n")
+        session.get_screen_state = AsyncMock(return_value=(80, 2, screen_buffer))
 
         monkeypatch.setattr(server.session_manager, "get_session_by_route_key", lambda _rk: session)
 
@@ -210,11 +214,15 @@ class TestLocalServerHelpers:
     @pytest.mark.asyncio
     async def test_screenshot_creates_session_for_known_slug(self, server, monkeypatch):
         request = MagicMock()
-        request.query = {"route_key": "known", "width": "90"}
+        request.query = {"route_key": "known"}
 
+        # Mock screen state
+        screen_buffer = [
+            [{"data": c, "fg": "default", "bg": "default", "bold": False, "italics": False, "underscore": False, "reverse": False} for c in "world" + " " * 75],
+            [{"data": " ", "fg": "default", "bg": "default", "bold": False, "italics": False, "underscore": False, "reverse": False}] * 80,
+        ]
         session = MagicMock()
-        session.get_screen_lines = AsyncMock(return_value=["world", ""])
-        session.get_replay_buffer = AsyncMock(return_value=b"world\r\n")
+        session.get_screen_state = AsyncMock(return_value=(80, 2, screen_buffer))
 
         # Pretend app exists for slug "known"
         server.session_manager.apps_by_slug["known"] = App(
@@ -546,7 +554,7 @@ class TestLocalServerMoreCoverage:
         request.headers = {}
 
         session = MagicMock()
-        session.get_screen_lines = AsyncMock(return_value=["SHOULD_NOT_BE_READ"])
+        session.get_screen_state = AsyncMock(return_value=(80, 2, []))
         monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
 
         server_with_no_apps._screenshot_cache["rk"] = (0.0, "<svg>cached</svg>")
@@ -556,17 +564,21 @@ class TestLocalServerMoreCoverage:
 
         resp = await server_with_no_apps._handle_screenshot(request)
         assert "cached" in resp.text
-        session.get_screen_lines.assert_not_awaited()
+        session.get_screen_state.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_handle_screenshot_invalid_width_height_defaults(self, server_with_no_apps, monkeypatch):
+    async def test_handle_screenshot_renders_screen_state(self, server_with_no_apps, monkeypatch):
         request = MagicMock()
-        request.query = {"route_key": "rk", "width": "nope", "height": "nope"}
+        request.query = {"route_key": "rk"}
         request.headers = {}
 
+        # Mock screen state with some content
+        screen_buffer = [
+            [{"data": c, "fg": "default", "bg": "default", "bold": False, "italics": False, "underscore": False, "reverse": False} for c in "hello" + " " * 75],
+            [{"data": " ", "fg": "default", "bg": "default", "bold": False, "italics": False, "underscore": False, "reverse": False}] * 80,
+        ]
         session = MagicMock()
-        session.get_screen_lines = AsyncMock(return_value=["hello", ""])
-        session.get_replay_buffer = AsyncMock(return_value=b"hello\n")
+        session.get_screen_state = AsyncMock(return_value=(80, 2, screen_buffer))
         monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
 
         resp = await server_with_no_apps._handle_screenshot(request)
@@ -736,15 +748,19 @@ class TestLocalServerMoreCoverage:
         assert created is True
 
     @pytest.mark.asyncio
-    async def test_handle_screenshot_uses_replay_buffer_with_pyte(self, server_with_no_apps, monkeypatch):
-        """Test that screenshot uses replay buffer with pyte for colored rendering."""
+    async def test_handle_screenshot_uses_screen_state(self, server_with_no_apps, monkeypatch):
+        """Test that screenshot uses get_screen_state for rendering."""
         request = MagicMock()
         request.query = {"route_key": "rk"}
         request.headers = {}
 
+        # Mock screen state
+        screen_buffer = [
+            [{"data": c, "fg": "default", "bg": "default", "bold": False, "italics": False, "underscore": False, "reverse": False} for c in "line1" + " " * 75],
+            [{"data": c, "fg": "default", "bg": "default", "bold": False, "italics": False, "underscore": False, "reverse": False} for c in "line2" + " " * 75],
+        ]
         session = MagicMock()
-        session.get_screen_lines = AsyncMock(return_value=["line1", "line2", ""])
-        session.get_replay_buffer = AsyncMock(return_value=b"line1\r\nline2\r\n")
+        session.get_screen_state = AsyncMock(return_value=(80, 2, screen_buffer))
         monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
 
         server_with_no_apps._route_last_activity["rk"] = 1.0
@@ -752,4 +768,4 @@ class TestLocalServerMoreCoverage:
         resp = await server_with_no_apps._handle_screenshot(request)
         assert resp.content_type == "image/svg+xml"
         assert "<svg" in resp.text
-        session.get_replay_buffer.assert_awaited_once()
+        session.get_screen_state.assert_awaited_once()
