@@ -388,6 +388,9 @@ class LocalServer:
             await self._create_terminal_session(route_key, width, height)
             return True
         await session_process.set_terminal_size(width, height)
+        # Invalidate screenshot cache on resize - content needs to re-render
+        self._screenshot_cache.pop(route_key, None)
+        self._screenshot_cache_etag.pop(route_key, None)
         return False
 
     async def _handle_ping(
