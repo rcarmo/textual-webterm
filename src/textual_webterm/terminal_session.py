@@ -56,6 +56,9 @@ class TerminalSession(Session):
         self._screen = pyte.Screen(DEFAULT_SCREEN_WIDTH, DEFAULT_SCREEN_HEIGHT)
         self._stream = pyte.Stream(self._screen)
         self._screen_lock = asyncio.Lock()
+        # Track last known terminal size for reconnection
+        self._last_width = DEFAULT_SCREEN_WIDTH
+        self._last_height = DEFAULT_SCREEN_HEIGHT
         super().__init__()
 
     def __rich_repr__(self) -> rich.repr.Result:
@@ -64,6 +67,9 @@ class TerminalSession(Session):
 
     async def open(self, width: int = 80, height: int = 24) -> None:
         log.info("Opening terminal session %s with command: %s", self.session_id, self.command)
+        # Track the initial size
+        self._last_width = width
+        self._last_height = height
         # Initialize pyte screen with the requested size (under lock to prevent races)
         async with self._screen_lock:
             self._screen = pyte.Screen(width, height)
@@ -100,12 +106,26 @@ class TerminalSession(Session):
         fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, buf)
 
     async def set_terminal_size(self, width: int, height: int) -> None:
+        # Track the size for reconnection
+        self._last_width = width
+        self._last_height = height
         # First resize the PTY (blocking call in executor)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._set_terminal_size, width, height)
         # Then resize pyte screen to match (after PTY resize completes)
         async with self._screen_lock:
             self._screen.resize(height, width)
+
+    async def force_redraw(self) -> None:
+        """Force a terminal redraw by re-sending the current size.
+
+        This triggers a SIGWINCH to the child process, causing applications
+        like tmux to redraw their display.
+        """
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, self._set_terminal_size, self._last_width, self._last_height
+        )
 
     async def _add_to_replay_buffer(self, data: bytes) -> None:
         """Add data to replay buffer, maintaining size limit."""
