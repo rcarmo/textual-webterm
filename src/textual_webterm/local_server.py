@@ -945,6 +945,34 @@ class LocalServer:
 </head>
 <body>
     <div id=\"terminal\" class=\"textual-terminal\" data-session-websocket-url=\"{ws_url}\" data-font-size=\"16\"></div>
+    <script>
+      // Try to focus the terminal after it initializes
+      (function() {{
+        function focusTerminal() {{
+          // xterm.js creates a textarea for input
+          const textarea = document.querySelector('.xterm-helper-textarea');
+          if (textarea) {{
+            textarea.focus();
+            return true;
+          }}
+          // Also try focusing the terminal container
+          const term = document.querySelector('.xterm');
+          if (term) {{
+            term.focus();
+            return true;
+          }}
+          return false;
+        }}
+        // Try immediately and with delays as terminal initializes async
+        if (!focusTerminal()) {{
+          setTimeout(focusTerminal, 100);
+          setTimeout(focusTerminal, 500);
+          setTimeout(focusTerminal, 1000);
+        }}
+        // Also focus on window focus (when switching tabs back)
+        window.addEventListener('focus', focusTerminal);
+      }})();
+    </script>
 </body>
 </html>"""
         return web.Response(text=html_content, content_type="text/html")
