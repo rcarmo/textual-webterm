@@ -8,6 +8,10 @@ This is heavily based on [textual-web](https://github.com/Textualize/textual-web
 
 Built on top of [textual-serve](https://github.com/Textualize/textual-serve), this package provides an easy way to expose terminal sessions and Textual applications via HTTP/WebSocket with automatic reconnection support.
 
+Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to keep track of several containerized AI coding agents:
+
+![Screenshot](docs/screenshot.png)
+
 ## Features
 
 - 🖥️ **Web-based terminal** - Access your terminal from any browser
