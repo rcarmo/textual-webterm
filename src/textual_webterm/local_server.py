@@ -148,6 +148,14 @@ def _rewrite_svg_fonts(svg: str) -> str:
 class LocalServer:
     def mark_route_activity(self, route_key: str) -> None:
         self._route_last_activity[route_key] = asyncio.get_event_loop().time()
+        # Notify SSE subscribers of activity
+        self._notify_activity(route_key)
+
+    def _notify_activity(self, route_key: str) -> None:
+        """Notify SSE subscribers that a route has activity."""
+        for queue in self._sse_subscribers:
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(route_key)
 
     def _get_cached_screenshot_response(
         self, request: web.Request, route_key: str
@@ -214,6 +222,9 @@ class LocalServer:
         self._screenshot_cache_etag: dict[str, str] = {}
         self._screenshot_locks: dict[str, asyncio.Lock] = {}
         self._route_last_activity: dict[str, float] = {}
+
+        # SSE subscribers for activity notifications
+        self._sse_subscribers: list[asyncio.Queue[str]] = []
 
         # Docker stats collector (only used in compose mode)
         self._docker_stats: DockerStatsCollector | None = None
@@ -298,6 +309,7 @@ class LocalServer:
             web.get("/ws/{route_key}", self._handle_websocket),
             web.get("/screenshot.svg", self._handle_screenshot),
             web.get("/cpu-sparkline.svg", self._handle_cpu_sparkline),
+            web.get("/events", self._handle_sse),
             web.get("/health", self._handle_health_check),
             web.get("/", self._handle_root),
         ]
@@ -656,6 +668,40 @@ class LocalServer:
         headers = {"Cache-Control": "no-cache, max-age=0"}
         return web.Response(text=svg, content_type="image/svg+xml", headers=headers)
 
+    async def _handle_sse(self, request: web.Request) -> web.StreamResponse:
+        """Server-Sent Events endpoint for activity notifications."""
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
+        await response.prepare(request)
+
+        # Create queue for this subscriber
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
+        self._sse_subscribers.append(queue)
+
+        try:
+            while True:
+                try:
+                    # Wait for activity with timeout for keepalive
+                    route_key = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    # Send activity event
+                    await response.write(f"event: activity\ndata: {route_key}\n\n".encode())
+                except asyncio.TimeoutError:
+                    # Send keepalive comment
+                    await response.write(b": keepalive\n\n")
+                except (ConnectionResetError, ConnectionAbortedError):
+                    break
+        finally:
+            self._sse_subscribers.remove(queue)
+
+        return response
+
     async def _handle_health_check(self, _request: web.Request) -> web.Response:
         return web.Response(text="Local server is running")
 
@@ -772,36 +818,80 @@ class LocalServer:
         }}
         const grid = document.getElementById('grid');
         const cards = tiles.map(makeTile);
-        cards.forEach(c => grid.appendChild(c));
-        async function refresh() {{
-            for (const card of cards) {{
-                const tile = tiles[cards.indexOf(card)];
-                const url = `/screenshot.svg?route_key=${{encodeURIComponent(tile.slug)}}`;
-                card.img.src = url;
-                if (composeMode && card.sparkline) {{
+        const cardsBySlug = {{}};
+        cards.forEach((c, i) => {{
+            grid.appendChild(c);
+            cardsBySlug[tiles[i].slug] = c;
+        }});
+
+        // Refresh a single tile's screenshot
+        function refreshTile(slug) {{
+            const card = cardsBySlug[slug];
+            if (!card) return;
+            card.img.src = `/screenshot.svg?route_key=${{encodeURIComponent(slug)}}&_t=${{Date.now()}}`;
+        }}
+
+        // Refresh all screenshots (initial load)
+        function refreshAll() {{
+            for (const tile of tiles) {{
+                const card = cardsBySlug[tile.slug];
+                card.img.src = `/screenshot.svg?route_key=${{encodeURIComponent(tile.slug)}}`;
+            }}
+        }}
+
+        // Refresh sparklines periodically (CPU stats don't need SSE)
+        function refreshSparklines() {{
+            if (!composeMode) return;
+            for (const tile of tiles) {{
+                const card = cardsBySlug[tile.slug];
+                if (card.sparkline) {{
                     card.sparkline.src = `/cpu-sparkline.svg?container=${{encodeURIComponent(tile.slug)}}&width=80&height=16&_t=${{Date.now()}}`;
                 }}
             }}
         }}
 
-        let refreshTimer = null;
-        function startRefresh() {{
-            if (refreshTimer !== null) return;
-            refresh();
-            refreshTimer = setInterval(refresh, 5000);
+        // SSE connection for real-time screenshot updates
+        let eventSource = null;
+        let sparklineTimer = null;
+
+        function startSSE() {{
+            if (eventSource) return;
+            eventSource = new EventSource('/events');
+            eventSource.addEventListener('activity', (e) => {{
+                refreshTile(e.data);
+            }});
+            eventSource.onerror = () => {{
+                // Reconnect on error
+                eventSource.close();
+                eventSource = null;
+                setTimeout(startSSE, 2000);
+            }};
+            // Initial load of all screenshots
+            refreshAll();
+            // Start sparkline polling (every 30s since it's 30min history)
+            if (composeMode && !sparklineTimer) {{
+                refreshSparklines();
+                sparklineTimer = setInterval(refreshSparklines, 30000);
+            }}
         }}
-        function stopRefresh() {{
-            if (refreshTimer === null) return;
-            clearInterval(refreshTimer);
-            refreshTimer = null;
+
+        function stopSSE() {{
+            if (eventSource) {{
+                eventSource.close();
+                eventSource = null;
+            }}
+            if (sparklineTimer) {{
+                clearInterval(sparklineTimer);
+                sparklineTimer = null;
+            }}
         }}
 
         document.addEventListener('visibilitychange', () => {{
-            if (document.hidden) stopRefresh();
-            else startRefresh();
+            if (document.hidden) stopSSE();
+            else startSSE();
         }});
 
-        if (!document.hidden) startRefresh();
+        if (!document.hidden) startSSE();
     </script>
 </body>
 </html>"""

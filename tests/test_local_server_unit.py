@@ -769,3 +769,42 @@ class TestLocalServerMoreCoverage:
         assert resp.content_type == "image/svg+xml"
         assert "<svg" in resp.text
         session.get_screen_state.assert_awaited_once()
+
+    def test_notify_activity_pushes_to_subscribers(self, server_with_no_apps):
+        """Test that activity notifications are pushed to SSE subscribers."""
+        import asyncio
+
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=10)
+        server_with_no_apps._sse_subscribers.append(queue)
+
+        server_with_no_apps._notify_activity("test-route")
+
+        assert not queue.empty()
+        assert queue.get_nowait() == "test-route"
+
+    def test_notify_activity_handles_full_queue(self, server_with_no_apps):
+        """Test that full queues don't cause errors."""
+        import asyncio
+
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+        queue.put_nowait("existing")
+        server_with_no_apps._sse_subscribers.append(queue)
+
+        # Should not raise even though queue is full
+        server_with_no_apps._notify_activity("test-route")
+
+        # Only the original item should be there
+        assert queue.get_nowait() == "existing"
+
+    @pytest.mark.asyncio
+    async def test_mark_route_activity_triggers_notification(self, server_with_no_apps):
+        """Test that mark_route_activity triggers SSE notification."""
+        import asyncio
+
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=10)
+        server_with_no_apps._sse_subscribers.append(queue)
+
+        server_with_no_apps.mark_route_activity("my-route")
+
+        assert not queue.empty()
+        assert queue.get_nowait() == "my-route"
