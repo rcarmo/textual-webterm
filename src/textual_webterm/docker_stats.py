@@ -325,6 +325,9 @@ def render_sparkline_svg(
         # Empty placeholder
         return f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg"></svg>'
 
+    # Prepend zero to start sparkline from baseline
+    values = [0.0, *values]
+
     # Normalize values to 0-1 range
     max_val = max(values) if max(values) > 0 else 1
     normalized = [v / max_val for v in values]
