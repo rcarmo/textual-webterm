@@ -716,14 +716,17 @@ class TestEdgeCases:
         assert "A中B🎉C" in svg
 
     def test_special_unicode_blocks(self) -> None:
-        """Unicode box drawing characters render."""
+        """Unicode box drawing characters render (separately for precise positioning)."""
         buffer = [[
             self._char("┌"),
             self._char("─"),
             self._char("┐"),
         ]]
         svg = render_terminal_svg(buffer, width=3, height=1)
-        assert "┌─┐" in svg
+        # Box drawing chars are rendered separately for precise x positioning
+        assert "┌" in svg
+        assert "─" in svg
+        assert "┐" in svg
 
     def test_ansi_bright_colors(self) -> None:
         """All bright ANSI colors render."""

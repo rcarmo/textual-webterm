@@ -255,6 +255,17 @@ class _Span(TypedDict):
     has_bg: bool
 
 
+def _is_box_drawing(char: str) -> bool:
+    """Check if character is a box-drawing or block element that needs precise positioning."""
+    if not char:
+        return False
+    code = ord(char[0])
+    # Box Drawing: U+2500-U+257F
+    # Block Elements: U+2580-U+259F
+    # Geometric Shapes (some): U+25A0-U+25FF
+    return 0x2500 <= code <= 0x259F or 0x25A0 <= code <= 0x25FF
+
+
 def _build_row_spans(
     row_data: list[CharData],
     default_fg: str,
@@ -286,9 +297,15 @@ def _build_row_spans(
 
         has_bg = bg != default_bg
 
+        # Don't merge box-drawing characters - they need precise x positioning
+        is_box = _is_box_drawing(char_data)
+        prev_is_box = current_span is not None and _is_box_drawing(current_span["text"][-1:])
+
         # Check if we can extend current span
         if (
             current_span is not None
+            and not is_box
+            and not prev_is_box
             and current_span["fg"] == fg
             and current_span["bg"] == bg
             and current_span["bold"] == char["bold"]
