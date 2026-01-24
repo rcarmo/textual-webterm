@@ -577,11 +577,12 @@ class LocalServer:
             def _render_svg() -> str:
                 # Use the session's screen buffer directly - this has the correct
                 # dimensions matching the actual terminal, preventing wrapping issues
+                # Add extra height for Rich's clip path generation quirk
                 console = Console(
-                    record=True, width=screen_width, height=screen_height, file=io.StringIO()
+                    record=True, width=screen_width, height=screen_height + 2, file=io.StringIO()
                 )
 
-                for i, row_data in enumerate(screen_buffer):
+                for row_data in screen_buffer:
                     line = Text()
                     for char in row_data:
                         char_data = char["data"]
@@ -611,9 +612,7 @@ class LocalServer:
                         else:
                             line.append(char_data)
 
-                    # Don't add newline after last row to prevent extra line in SVG
-                    is_last = i == len(screen_buffer) - 1
-                    console.print(line, end="" if is_last else "\n", highlight=False)
+                    console.print(line, highlight=False)
 
                 return console.export_svg(
                     title="textual-webterm",
