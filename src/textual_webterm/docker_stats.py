@@ -107,7 +107,10 @@ class DockerStatsCollector:
         # List all containers
         containers = await self._make_request("/containers/json")
         if not isinstance(containers, list):
+            log.debug("Container list request returned non-list: %s", type(containers))
             return {}
+
+        log.debug("Found %d containers, looking for services: %s", len(containers), service_names)
 
         mapping: dict[str, str] = {}
         for container in containers:
@@ -122,6 +125,7 @@ class DockerStatsCollector:
             service = labels.get("com.docker.compose.service", "")
             if service in service_names:
                 mapping[service] = container_id
+                log.debug("Matched service %s -> %s (via label)", service, container_id)
                 continue
 
             # Fall back to container name matching
@@ -132,7 +136,14 @@ class DockerStatsCollector:
                 for svc in service_names:
                     if svc in clean_name or clean_name == svc:
                         mapping[svc] = container_id
+                        log.debug("Matched service %s -> %s (via name %s)", svc, container_id, clean_name)
                         break
+
+        if not mapping:
+            # Log what we found for debugging
+            found_services = [c.get("Labels", {}).get("com.docker.compose.service", "?") for c in containers if isinstance(c, dict)]
+            found_names = [c.get("Names", ["?"])[0] if c.get("Names") else "?" for c in containers if isinstance(c, dict)]
+            log.debug("No matches. Container services: %s, names: %s", found_services, found_names)
 
         return mapping
 
@@ -183,6 +194,7 @@ class DockerStatsCollector:
         stats = await self._make_request(path)
 
         if not isinstance(stats, dict):
+            log.debug("Stats request for %s (%s) returned non-dict: %s", service_name, container_id, type(stats))
             return
 
         cpu_stats = stats.get("cpu_stats", {})
@@ -193,6 +205,9 @@ class DockerStatsCollector:
             if service_name not in self._cpu_history:
                 self._cpu_history[service_name] = deque(maxlen=STATS_HISTORY_SIZE)
             self._cpu_history[service_name].append(cpu_percent)
+            log.debug("CPU for %s: %.1f%% (history size: %d)", service_name, cpu_percent, len(self._cpu_history[service_name]))
+        else:
+            log.debug("CPU calculation returned None for %s", service_name)
 
     async def _poll_loop(self, service_names: list[str]) -> None:
         """Background polling loop."""
