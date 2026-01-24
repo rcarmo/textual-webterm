@@ -310,6 +310,37 @@ class LocalServer:
 
             await self.exit_event.wait()
 
+    async def _handle_stdin(
+        self, envelope: list, route_key: str, _ws: web.WebSocketResponse
+    ) -> None:
+        self.mark_route_activity(route_key)
+        data = envelope[1] if len(envelope) > 1 else ""
+        session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
+        if session_process:
+            await session_process.send_bytes(data.encode("utf-8"))
+
+    async def _handle_resize(
+        self, envelope: list, route_key: str, _ws: web.WebSocketResponse
+    ) -> bool:
+        """Handle resize message. Returns True if a new session was created."""
+        self.mark_route_activity(route_key)
+        size_data = envelope[1] if len(envelope) > 1 else {}
+        width = max(1, min(500, int(size_data.get("width", 80))))
+        height = max(1, min(500, int(size_data.get("height", 24))))
+
+        session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
+        if session_process is None:
+            await self._create_terminal_session(route_key, width, height)
+            return True
+        await session_process.set_terminal_size(width, height)
+        return False
+
+    async def _handle_ping(
+        self, envelope: list, _route_key: str, ws: web.WebSocketResponse
+    ) -> None:
+        data = envelope[1] if len(envelope) > 1 else ""
+        await ws.send_json(["pong", data])
+
     async def _dispatch_ws_message(
         self,
         envelope: list,
@@ -320,29 +351,14 @@ class LocalServer:
         msg_type = envelope[0]
 
         if msg_type == "stdin":
-            self.mark_route_activity(route_key)
-            data = envelope[1] if len(envelope) > 1 else ""
-            session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
-            if session_process:
-                await session_process.send_bytes(data.encode("utf-8"))
-
+            await self._handle_stdin(envelope, route_key, ws)
         elif msg_type == "resize":
-            self.mark_route_activity(route_key)
-            size_data = envelope[1] if len(envelope) > 1 else {}
-            width = max(1, min(500, int(size_data.get("width", 80))))
-            height = max(1, min(500, int(size_data.get("height", 24))))
-
-            if not session_created:
-                await self._create_terminal_session(route_key, width, height)
+            if not session_created and await self._handle_resize(envelope, route_key, ws):
                 session_created = True
-            else:
-                session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
-                if session_process:
-                    await session_process.set_terminal_size(width, height)
-
+            elif session_created:
+                await self._handle_resize(envelope, route_key, ws)
         elif msg_type == "ping":
-            data = envelope[1] if len(envelope) > 1 else ""
-            await ws.send_json(["pong", data])
+            await self._handle_ping(envelope, route_key, ws)
 
         return session_created
 
