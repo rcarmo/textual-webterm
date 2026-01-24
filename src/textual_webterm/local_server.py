@@ -44,21 +44,32 @@ SVG_MONO_FONT_STACK = (
 )
 
 # Map pyte color names to Rich-compatible names
+# pyte uses different naming conventions than Rich for some colors
 PYTE_TO_RICH_COLOR = {
+    # Bright colors (pyte concatenates, Rich uses underscore)
     "brightblack": "bright_black",
     "brightred": "bright_red",
     "brightgreen": "bright_green",
+    "brightbrown": "bright_yellow",  # bright brown = bright yellow
     "brightyellow": "bright_yellow",
     "brightblue": "bright_blue",
     "brightmagenta": "bright_magenta",
+    "bfightmagenta": "bright_magenta",  # typo in pyte's BG_AIXTERM
     "brightcyan": "bright_cyan",
     "brightwhite": "bright_white",
-    "brown": "yellow",  # pyte uses 'brown' for ANSI yellow
+    # Standard colors
+    "brown": "yellow",  # pyte uses 'brown' for ANSI color 33 (yellow)
 }
 
 
 def _pyte_color_to_rich(color: str) -> str:
-    """Convert pyte color to Rich-compatible color string."""
+    """Convert pyte color to Rich-compatible color string.
+
+    Handles:
+    - Named color mappings (e.g., 'brown' -> 'yellow')
+    - Bright color name format (e.g., 'brightred' -> 'bright_red')
+    - Hex colors from 256-color/truecolor (e.g., 'ff8700' -> '#ff8700')
+    """
     if color == "default":
         return color
     # Check mapping first
