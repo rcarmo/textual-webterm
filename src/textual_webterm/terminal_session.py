@@ -113,12 +113,11 @@ class TerminalSession(Session):
         return (buf[1], buf[0])  # cols, rows
 
     async def _sync_pyte_to_pty(self) -> None:
-        """Sync pyte screen size to actual PTY size and trigger redraw."""
+        """Sync pyte screen size to actual PTY size."""
         if self.master_fd is None:
             return
         loop = asyncio.get_running_loop()
         width, height = await loop.run_in_executor(None, self._get_terminal_size)
-        needs_redraw = False
         async with self._screen_lock:
             if self._screen.columns != width or self._screen.lines != height:
                 log.debug("Syncing pyte screen from %dx%d to %dx%d",
@@ -126,42 +125,20 @@ class TerminalSession(Session):
                 self._screen.resize(height, width)
                 self._last_width = width
                 self._last_height = height
-                needs_redraw = True
-        # Toggle PTY size outside lock to force tmux to redraw
-        if needs_redraw:
-            await loop.run_in_executor(
-                None, self._set_terminal_size, width - 1, height
-            )
-            await loop.run_in_executor(
-                None, self._set_terminal_size, width, height
-            )
-            # Brief delay to let redraw data arrive
-            await asyncio.sleep(0.1)
 
     async def set_terminal_size(self, width: int, height: int) -> None:
-        """Set terminal size and force a redraw."""
-        # Track the size for reconnection
+        """Set terminal size."""
         self._last_width = width
         self._last_height = height
         loop = asyncio.get_running_loop()
-        # Toggle size to force tmux to redraw, then set final size
-        await loop.run_in_executor(None, self._set_terminal_size, width - 1, height)
         await loop.run_in_executor(None, self._set_terminal_size, width, height)
         # Resize pyte screen to match
         async with self._screen_lock:
             self._screen.resize(height, width)
 
     async def force_redraw(self) -> None:
-        """Force a terminal redraw by toggling the size.
-
-        Briefly changes the terminal size then restores it, which forces
-        applications like tmux to fully redraw all panes.
-        """
+        """Force a terminal redraw by re-sending current size."""
         loop = asyncio.get_running_loop()
-        # Briefly shrink by 1 column then restore - this forces a full redraw
-        await loop.run_in_executor(
-            None, self._set_terminal_size, self._last_width - 1, self._last_height
-        )
         await loop.run_in_executor(
             None, self._set_terminal_size, self._last_width, self._last_height
         )
