@@ -14,14 +14,14 @@
 - [x] Static assets delegated to textual-serve
 - [x] /screenshot.svg renders replay buffer to SVG
 - [x] Disconnect triggers resize to 132x45
-- [ ] Narrow WebSocket error handling (avoid bare Exception)
-- [ ] Consider TaskGroup/cleanup context for aiohttp runner
+- [x] Narrow WebSocket error handling (avoid bare Exception)
+- [x] Consider TaskGroup/cleanup context for aiohttp runner
 
 ## Sessions
 - [x] Session.is_running() added
 - [x] AppSession double JSON parse fixed; payload capped (16MB)
 - [x] TerminalSession replay buffer; resize on disconnect
-- [ ] TerminalSession set_terminal_size is blocking; consider run_in_executor
+- [x] TerminalSession set_terminal_size is blocking; consider run_in_executor
 
 ## Poller
 - [x] OSError-only read handling; write error handling added
@@ -35,6 +35,6 @@
 - [x] 135 tests passing; coverage ~88%
 
 ## Remaining Ideas (Low Priority)
-- [ ] Consolidate WS dispatch table
-- [ ] Simplify _get_ws_url_from_request
-- [ ] Normalize logging style (f-string vs %%)
+- [x] Consolidate WS dispatch table
+- [x] Simplify _get_ws_url_from_request
+- [x] Normalize logging style (f-string vs %%)
