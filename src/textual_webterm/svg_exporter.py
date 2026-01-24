@@ -266,6 +266,27 @@ def _is_box_drawing(char: str) -> bool:
     return 0x2500 <= code <= 0x259F or 0x25A0 <= code <= 0x25FF
 
 
+def _should_break_span(current_text: str, new_char: str) -> bool:
+    """Check if we should break the span before adding new_char.
+
+    Box-drawing characters should not merge with different box-drawing chars
+    or with regular text, but same box-drawing chars can merge (e.g., ─────).
+    """
+    if not current_text:
+        return False
+
+    last_char = current_text[-1]
+    curr_is_box = _is_box_drawing(last_char)
+    new_is_box = _is_box_drawing(new_char)
+
+    # If transitioning between box and non-box, break
+    if curr_is_box != new_is_box:
+        return True
+
+    # If both are box-drawing but different characters, break
+    return curr_is_box and new_is_box and last_char != new_char
+
+
 def _build_row_spans(
     row_data: list[CharData],
     default_fg: str,
@@ -297,15 +318,15 @@ def _build_row_spans(
 
         has_bg = bg != default_bg
 
-        # Don't merge box-drawing characters - they need precise x positioning
-        is_box = _is_box_drawing(char_data)
-        prev_is_box = current_span is not None and _is_box_drawing(current_span["text"][-1:])
+        # Check if we should break the span (for box-drawing character boundaries)
+        should_break = current_span is not None and _should_break_span(
+            current_span["text"], char_data
+        )
 
         # Check if we can extend current span
         if (
             current_span is not None
-            and not is_box
-            and not prev_is_box
+            and not should_break
             and current_span["fg"] == fg
             and current_span["bg"] == bg
             and current_span["bold"] == char["bold"]
