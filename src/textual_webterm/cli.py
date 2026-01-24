@@ -149,10 +149,12 @@ def app(
     _config = default_config()
 
     landing_apps: list = []
+    is_compose_mode = False
     if landing_manifest:
         landing_apps = load_landing_yaml(landing_manifest)
     elif compose_manifest:
         landing_apps = load_compose_manifest(compose_manifest)
+        is_compose_mode = True
 
     server = LocalServer(
         "./",
@@ -160,6 +162,7 @@ def app(
         host=host,
         port=port,
         landing_apps=landing_apps,
+        compose_mode=is_compose_mode,
     )
     for app_entry in landing_apps:
         server.add_terminal(app_entry.name, app_entry.command, slug=app_entry.slug)

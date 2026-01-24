@@ -20,6 +20,7 @@ from rich.style import Style
 from rich.text import Text
 
 from . import constants
+from .docker_stats import DockerStatsCollector, render_sparkline_svg
 from .exit_poller import ExitPoller
 from .identity import generate
 from .poller import Poller
@@ -187,6 +188,7 @@ class LocalServer:
         port: int = 8080,
         exit_on_idle: int = 0,
         landing_apps: list | None = None,
+        compose_mode: bool = False,
     ) -> None:
         self.host = host
         self.port = port
@@ -206,11 +208,15 @@ class LocalServer:
 
         self._websocket_connections: dict[RouteKey, web.WebSocketResponse] = {}
         self._landing_apps = landing_apps or []
+        self._compose_mode = compose_mode
 
         self._screenshot_cache: dict[str, tuple[float, str]] = {}
         self._screenshot_cache_etag: dict[str, str] = {}
         self._screenshot_locks: dict[str, asyncio.Lock] = {}
         self._route_last_activity: dict[str, float] = {}
+
+        # Docker stats collector (only used in compose mode)
+        self._docker_stats: DockerStatsCollector | None = None
 
     @property
     def app_count(self) -> int:
@@ -291,6 +297,7 @@ class LocalServer:
         routes: list[web.AbstractRouteDef] = [
             web.get("/ws/{route_key}", self._handle_websocket),
             web.get("/screenshot.svg", self._handle_screenshot),
+            web.get("/cpu-sparkline.svg", self._handle_cpu_sparkline),
             web.get("/health", self._handle_health_check),
             web.get("/", self._handle_root),
         ]
@@ -323,6 +330,14 @@ class LocalServer:
         async with contextlib.AsyncExitStack() as stack:
             await runner.setup()
             stack.push_async_callback(runner.cleanup)
+
+            # Start Docker stats collector in compose mode
+            if self._compose_mode and self._landing_apps:
+                self._docker_stats = DockerStatsCollector()
+                if self._docker_stats.available:
+                    containers = [app.slug for app in self._landing_apps]
+                    self._docker_stats.start(containers)
+                    stack.push_async_callback(self._docker_stats.stop)
 
             site = web.TCPSite(runner, self.host, self.port)
             await site.start()
@@ -613,6 +628,34 @@ class LocalServer:
             headers = {"Cache-Control": "no-cache", "ETag": etag}
             return web.Response(text=svg, content_type="image/svg+xml", headers=headers)
 
+    async def _handle_cpu_sparkline(self, request: web.Request) -> web.Response:
+        """Return CPU sparkline SVG for a container."""
+        container = request.query.get("container", "")
+        if not container:
+            raise web.HTTPBadRequest(text="Missing container parameter")
+
+        # Get dimensions from query params
+        try:
+            width = int(request.query.get("width", "100"))
+        except ValueError:
+            width = 100
+        width = max(50, min(300, width))
+
+        try:
+            height = int(request.query.get("height", "20"))
+        except ValueError:
+            height = 20
+        height = max(10, min(100, height))
+
+        # Get CPU history
+        values: list[float] = []
+        if self._docker_stats:
+            values = self._docker_stats.get_cpu_history(container)
+
+        svg = render_sparkline_svg(values, width=width, height=height)
+        headers = {"Cache-Control": "no-cache, max-age=0"}
+        return web.Response(text=svg, content_type="image/svg+xml", headers=headers)
+
     async def _handle_health_check(self, _request: web.Request) -> web.Response:
         return web.Response(text="Local server is running")
 
@@ -665,6 +708,7 @@ class LocalServer:
                 for app in self._landing_apps
             ]
             tiles_json = json.dumps(tiles)
+            compose_mode_js = "true" if self._compose_mode else "false"
             html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -674,7 +718,9 @@ class LocalServer:
         h1 {{ margin-bottom: 8px; }}
         .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }}
         .tile {{ background: #1e293b; border: 1px solid #334155; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }}
-        .tile-header {{ padding: 10px 12px; font-weight: bold; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 8px; }}
+        .tile-header {{ padding: 10px 12px; font-weight: bold; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; }}
+        .tile-title {{ display: flex; align-items: center; gap: 8px; }}
+        .sparkline {{ opacity: 0.9; }}
         .tile-body {{ padding: 0; }}
         .thumb {{ width: 100%; height: 180px; object-fit: contain; background: #0b1220; display: block; }}
         .meta {{ padding: 8px 12px; color: #94a3b8; font-size: 12px; }}
@@ -686,12 +732,25 @@ class LocalServer:
     <div class=\"grid\" id=\"grid\"></div>
     <script>
         const tiles = {tiles_json};
+        const composeMode = {compose_mode_js};
         function makeTile(tile) {{
             const card = document.createElement('div');
             card.className = 'tile';
             const header = document.createElement('div');
             header.className = 'tile-header';
-            header.innerHTML = `<span>${{tile.name}}</span>`;
+            const titleSpan = document.createElement('div');
+            titleSpan.className = 'tile-title';
+            titleSpan.innerHTML = `<span>${{tile.name}}</span>`;
+            header.appendChild(titleSpan);
+            if (composeMode) {{
+                const sparkline = document.createElement('img');
+                sparkline.className = 'sparkline';
+                sparkline.width = 80;
+                sparkline.height = 16;
+                sparkline.alt = 'CPU';
+                header.appendChild(sparkline);
+                card.sparkline = sparkline;
+            }}
             const body = document.createElement('div');
             body.className = 'tile-body';
             const img = document.createElement('img');
@@ -719,6 +778,9 @@ class LocalServer:
                 const tile = tiles[cards.indexOf(card)];
                 const url = `/screenshot.svg?route_key=${{encodeURIComponent(tile.slug)}}`;
                 card.img.src = url;
+                if (composeMode && card.sparkline) {{
+                    card.sparkline.src = `/cpu-sparkline.svg?container=${{encodeURIComponent(tile.slug)}}&width=80&height=16&_t=${{Date.now()}}`;
+                }}
             }}
         }}
 
