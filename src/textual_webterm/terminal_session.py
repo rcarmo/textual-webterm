@@ -54,7 +54,7 @@ class TerminalSession(Session):
         yield "command", self.command
 
     async def open(self, width: int = 80, height: int = 24) -> None:
-        log.info(f"Opening terminal session {self.session_id} with command: {self.command}")
+        log.info("Opening terminal session %s with command: %s", self.session_id, self.command)
         pid, master_fd = pty.fork()
         self.pid = pid
         self.master_fd = master_fd
@@ -78,7 +78,7 @@ class TerminalSession(Session):
             os.close(master_fd)
             self.master_fd = None
             raise
-        log.debug(f"Terminal session {self.session_id} opened successfully")
+        log.debug("Terminal session %s opened successfully", self.session_id)
 
     def _set_terminal_size(self, width: int, height: int) -> None:
         buf = array.array("h", [height, width, 0, 0])
@@ -106,7 +106,7 @@ class TerminalSession(Session):
     def update_connector(self, connector: SessionConnector) -> None:
         """Update the connector for reconnection without restarting the session."""
         self._connector = connector
-        log.debug(f"Updated connector for session {self.session_id}")
+        log.debug("Updated connector for session %s", self.session_id)
 
     async def start(self, connector: SessionConnector) -> asyncio.Task:
         self._connector = connector
@@ -158,7 +158,7 @@ class TerminalSession(Session):
             except ProcessLookupError:
                 pass  # Process already gone
             except Exception as e:
-                log.warning(f"Error closing terminal session {self.session_id}: {e}")
+                log.warning("Error closing terminal session %s: %s", self.session_id, e)
 
     async def wait(self) -> None:
         if self._task is not None:

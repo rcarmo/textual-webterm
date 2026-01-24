@@ -59,7 +59,7 @@ class SessionManager:
         route_key = self.routes.get_key(session_id)
         if route_key is not None:
             del self.routes[route_key]
-        log.debug(f"Session {session_id} ended")
+        log.debug("Session %s ended", session_id)
 
     async def close_all(self, timeout: float = 3.0) -> None:
         """Close app sessions.
@@ -132,20 +132,20 @@ class SessionManager:
                     session_id,
                     app.command,
                 )
-                log.info(f"Created terminal session {session_id}")
+                log.info("Created terminal session %s", session_id)
         else:
             session_process = AppSession(
                 self.path,
                 app.command,
                 session_id,
             )
-            log.info(f"Created app session {session_id}")
+            log.info("Created app session %s", session_id)
 
         self.sessions[session_id] = session_process
         self.routes[route_key] = session_id
 
         await session_process.open(*size)
-        log.debug(f"Session {session_id} opened and ready")
+        log.debug("Session %s opened and ready", session_id)
 
         return session_process
 

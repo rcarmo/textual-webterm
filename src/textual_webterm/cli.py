@@ -139,7 +139,7 @@ def app(
         textual-webterm -a ./calculator.py:CalculatorApp  # Serve from file
     """
     VERSION = version("textual-webterm")
-    log.info(f"textual-webterm v{VERSION}")
+    log.info("textual-webterm v%s", VERSION)
 
     if constants.DEBUG:
         log.warning("DEBUG env var is set; logs may be verbose!")
@@ -184,10 +184,10 @@ def app(
         else:
             # Module path - validate module and class names
             if not module_part.replace(".", "").replace("_", "").isalnum():
-                log.error(f"Invalid module path: {module_part}")
+                log.error("Invalid module path: %s", module_part)
                 sys.exit(1)
             if not class_name.isidentifier():
-                log.error(f"Invalid class name: {class_name}")
+                log.error("Invalid class name: %s", class_name)
                 sys.exit(1)
             run_command = (
                 f'python3 -c "from {module_part} import {class_name}; {class_name}().run()"'
@@ -195,16 +195,16 @@ def app(
 
         app_name = getattr(app_class, "TITLE", None) or class_name
         server.add_app(app_name, run_command, "")
-        log.info(f"Serving Textual app: {app_path}")
+        log.info("Serving Textual app: %s", app_path)
     elif command:
         # Run command as terminal
         server.add_terminal("Terminal", command, "")
-        log.info(f"Serving terminal: {command}")
+        log.info("Serving terminal: %s", command)
     elif not landing_apps:
         # Run default shell
         terminal_command = os.environ.get("SHELL", "/bin/sh")
         server.add_terminal("Terminal", terminal_command, "")
-        log.info(f"Serving terminal: {terminal_command}")
+        log.info("Serving terminal: %s", terminal_command)
 
     def _run_async():
         if constants.WINDOWS:
