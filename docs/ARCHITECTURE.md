@@ -7,20 +7,20 @@ This document describes the internal architecture of textual-webterm.
 textual-webterm is a web-based terminal server that exposes terminal sessions (or Textual apps) over HTTP and WebSocket. It's designed to run behind a reverse proxy with authentication.
 
 ```
-┌─────────────┐      ┌───────────────────────────────────────────────────┐
-│   Browser   │─────▶│                  local_server.py                  │
-│             │◀─────│               (aiohttp web server)                │
-└─────────────┘      │                                                   │
-       │             │  ┌───────────────┐  ┌───────────────────────────┐ │
-       │ WebSocket   │  │ session_      │  │ terminal_session.py       │ │
-       └────────────▶│  │ manager.py    │──│ (PTY + pyte emulator)     │ │
-                     │  └───────────────┘  └───────────────────────────┘ │
-                     │                                                   │
-                     │  ┌───────────────┐  ┌───────────────────────────┐ │
-                     │  │ poller.py     │  │ docker_stats.py           │ │
-                     │  │ (I/O thread)  │  │ (CPU metrics via socket)  │ │
-                     │  └───────────────┘  └───────────────────────────┘ │
-                     └───────────────────────────────────────────────────┘
+┌─────────────┐      ┌──────────────────────────────────────────────────┐
+│   Browser   │─────▶│                 local_server.py                  │
+│             │◀─────│              (aiohttp web server)                │
+└─────────────┘      │                                                  │
+       │             │  ┌──────────────┐  ┌──────────────────────────┐  │
+       │ WebSocket   │  │ session_     │  │ terminal_session.py      │  │
+       └────────────▶│  │ manager.py   │──│ (PTY + pyte emulator)    │  │
+                     │  └──────────────┘  └──────────────────────────┘  │
+                     │                                                  │
+                     │  ┌──────────────┐  ┌──────────────────────────┐  │
+                     │  │ poller.py    │  │ docker_stats.py          │  │
+                     │  │ (I/O thread) │  │ (CPU metrics via socket) │  │
+                     │  └──────────────┘  └──────────────────────────┘  │
+                     └──────────────────────────────────────────────────┘
 ```
 
 ## Core Components
