@@ -377,7 +377,10 @@ class TestTerminalSession:
         with patch.object(loop, "run_in_executor", new=AsyncMock()) as run_in_executor:
             await session.set_terminal_size(80, 24)
 
-        run_in_executor.assert_awaited_once_with(None, session._set_terminal_size, 80, 24)
+        # set_terminal_size toggles size (-1 then restore) to force redraw
+        assert run_in_executor.await_count == 2
+        run_in_executor.assert_any_await(None, session._set_terminal_size, 79, 24)
+        run_in_executor.assert_any_await(None, session._set_terminal_size, 80, 24)
 
     def test__set_terminal_size_calls_ioctl(self):
         from textual_webterm.terminal_session import TerminalSession

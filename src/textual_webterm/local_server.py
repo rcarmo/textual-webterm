@@ -445,9 +445,6 @@ class LocalServer:
             if session is None or not session.is_running():
                 self.session_manager.on_session_end(session_id)
                 session_id = None
-            elif hasattr(session, "force_redraw"):
-                # Force redraw on reconnect to refresh tmux/screen displays
-                await session.force_redraw()
 
         session_created = session_id is not None
 

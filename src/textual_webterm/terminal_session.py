@@ -139,13 +139,15 @@ class TerminalSession(Session):
             await asyncio.sleep(0.1)
 
     async def set_terminal_size(self, width: int, height: int) -> None:
+        """Set terminal size and force a redraw."""
         # Track the size for reconnection
         self._last_width = width
         self._last_height = height
-        # First resize the PTY (blocking call in executor)
         loop = asyncio.get_running_loop()
+        # Toggle size to force tmux to redraw, then set final size
+        await loop.run_in_executor(None, self._set_terminal_size, width - 1, height)
         await loop.run_in_executor(None, self._set_terminal_size, width, height)
-        # Then resize pyte screen to match (after PTY resize completes)
+        # Resize pyte screen to match
         async with self._screen_lock:
             self._screen.resize(height, width)
 
