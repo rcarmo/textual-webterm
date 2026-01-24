@@ -31,6 +31,13 @@ class TestColorToHex:
         assert _color_to_hex("#123456") == "#123456"
         assert _color_to_hex("#AABBCC") == "#AABBCC"
 
+    def test_hex_color_without_hash(self) -> None:
+        """Hex colors without # prefix (pyte's 256-color/truecolor) get # added."""
+        assert _color_to_hex("ff0000") == "#ff0000"
+        assert _color_to_hex("123456") == "#123456"
+        assert _color_to_hex("AABBCC") == "#AABBCC"
+        assert _color_to_hex("ff8700") == "#ff8700"  # Common 256-color orange
+
     def test_named_colors(self) -> None:
         """Named ANSI colors map correctly."""
         assert _color_to_hex("red") == ANSI_COLORS["red"]

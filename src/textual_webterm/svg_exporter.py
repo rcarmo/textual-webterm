@@ -68,9 +68,14 @@ def _color_to_hex(color: str, is_foreground: bool = True) -> str:
     if color == "default":
         return DEFAULT_FG if is_foreground else DEFAULT_BG
 
-    # Already a hex color
+    # Already a hex color with #
     if color.startswith("#"):
         return color
+
+    # Hex color without # prefix (pyte's 256-color/truecolor format)
+    # Check if it looks like a hex color (6 hex digits)
+    if len(color) == 6 and all(c in "0123456789abcdefABCDEF" for c in color):
+        return f"#{color}"
 
     # Named color lookup (case-insensitive)
     lower = color.lower()
