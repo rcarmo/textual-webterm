@@ -6,7 +6,7 @@ Serve terminal sessions and Textual apps over the web with a simple CLI command.
 
 This is heavily based on [textual-web](https://github.com/Textualize/textual-web), but specifically focused on serving a persistent terminal session in a way that you can host behind a reverse proxy (and some form of authentication).
 
-Built on top of [textual-serve](https://github.com/Textualize/textual-serve), this package provides an easy way to expose terminal sessions and Textual applications via HTTP/WebSocket with automatic reconnection support.
+Built on [xterm.js](https://xtermjs.org/) 6.0, this package provides an easy way to expose terminal sessions and Textual applications via HTTP/WebSocket with automatic reconnection support.
 
 Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to keep track of several containerized AI coding agents:
 
@@ -18,6 +18,7 @@ Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to
 - 🐍 **Textual app support** - Serve Textual apps directly from Python modules
 - 🔄 **Session reconnection** - Refresh the page and reconnect to the same session
 - 🎨 **Full terminal emulation** - Colors, cursor, and ANSI codes work correctly
+- 📜 **Scrollback history** - Scroll back through terminal output (configurable)
 - 📐 **Auto-sizing** - Terminal automatically resizes to fit the browser window
 - 📸 **Live screenshots** - Dashboard shows real-time SVG screenshots of terminals
 - 📊 **CPU sparklines** - Dashboard displays 30-minute CPU history for Docker containers
@@ -162,14 +163,34 @@ make install-dev
 - Lint: `make lint`
 - Format: `make format`
 - Tests: `make test`
-- Coverage (fail_under=80): `make coverage`
+- Coverage (fail_under=79): `make coverage`
 - Full check (lint + coverage): `make check`
+
+### Frontend Development
+
+The terminal UI is built with [xterm.js](https://xtermjs.org/) 6.0. The pre-built bundle is committed to the repo, so users can `pip install` without needing Node.js.
+
+To rebuild the frontend after modifying `terminal.ts`:
+
+```bash
+# Requires Bun (https://bun.sh)
+bun install
+bun run build
+# Or simply:
+make bundle
+```
+
+For development with auto-rebuild:
+
+```bash
+make bundle-watch
+```
 
 ### Notes
 
-- WebSocket protocol (browser <-> server) is JSON: `["stdin", data]`, `["resize", {"width": w, "height": h}]`, `["ping", data]`.
-- Static assets are provided by `textual-serve`; this project does not add custom static files.
-- Screenshots use [pyte](https://github.com/selectel/pyte) for ANSI interpretation and [Rich](https://github.com/Textualize/rich) for SVG rendering.
+- WebSocket protocol (browser ↔ server) is JSON: `["stdin", data]`, `["resize", {"width": w, "height": h}]`, `["ping", data]`.
+- Frontend source is in `src/textual_webterm/static/js/terminal.ts`.
+- Screenshots use [pyte](https://github.com/selectel/pyte) for ANSI interpretation and custom SVG rendering.
 - CPU stats are read directly from Docker socket using asyncio (no additional dependencies).
 
 ## Requirements
@@ -184,6 +205,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Related Projects
 
 - [Textual](https://github.com/Textualize/textual) - TUI framework for Python
-- [textual-serve](https://github.com/Textualize/textual-serve) - Serve Textual apps on the web
-- [Rich](https://github.com/Textualize/rich) - Rich text formatting for terminals
+- [xterm.js](https://xtermjs.org/) - Terminal emulator for the web
 - [pyte](https://github.com/selectel/pyte) - PYTE terminal emulator

@@ -186,6 +186,17 @@ JSON-encoded messages over WebSocket:
 
 ## Key Design Decisions
 
+### Why bundle xterm.js directly?
+
+We bundle xterm.js 6.0 directly rather than using textual-serve because:
+
+- **Full configuration control** - fontFamily, scrollback, theme are configurable
+- **No workarounds needed** - xterm.js uses canvas rendering which ignores CSS fonts
+- **Smaller footprint** - No unused fonts or images from textual-serve
+- **Latest features** - xterm.js 6.0 includes ligature support, synchronized output, etc.
+
+The pre-built `terminal.js` bundle is committed to the repo so users can `pip install` without needing Node.js/Bun.
+
 ### Why custom SVG exporter?
 
 Rich's `export_svg()` had alignment issues with box-drawing characters and varied font rendering across browsers. The custom exporter:
@@ -214,7 +225,7 @@ Unlike traditional web terminals, sessions survive page refreshes:
 
 ```
 src/textual_webterm/
-├── cli.py              # Typer CLI entry point
+├── cli.py              # Click CLI entry point
 ├── config.py           # Configuration parsing (YAML manifests)
 ├── local_server.py     # Main HTTP/WebSocket server
 ├── session_manager.py  # Session registry and routing
@@ -228,5 +239,11 @@ src/textual_webterm/
 ├── identity.py         # Session ID generation
 ├── slugify.py          # URL-safe slug generation
 ├── types.py            # Type aliases
-└── constants.py        # Platform constants
+├── constants.py        # Platform constants
+└── static/
+    ├── monospace.css   # Font stack CSS variables
+    ├── css/xterm.css   # xterm.js styles
+    └── js/
+        ├── terminal.ts # xterm.js client source (TypeScript)
+        └── terminal.js # Pre-built bundle (committed)
 ```
