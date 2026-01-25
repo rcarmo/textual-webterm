@@ -855,16 +855,26 @@ class LocalServer:
 <body>
     <div id=\"terminal\" class=\"textual-terminal\" data-session-websocket-url=\"{ws_url}\" data-font-size=\"16\"></div>
     <script>
-      // Try to focus the terminal after it initializes
+      // Override xterm.js font family (canvas/WebGL rendering ignores CSS)
       (function() {{
+        const FONT_FAMILY = 'ui-monospace, "SFMono-Regular", "FiraCode Nerd Font", "FiraMono Nerd Font", "Fira Code", "Roboto Mono", Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace';
+
+        function patchTerminal() {{
+          // textual.js stores terminal instance on the container element
+          const container = document.querySelector('.textual-terminal');
+          if (container && container.terminal) {{
+            container.terminal.options.fontFamily = FONT_FAMILY;
+            return true;
+          }}
+          return false;
+        }}
+
         function focusTerminal() {{
-          // xterm.js creates a textarea for input
           const textarea = document.querySelector('.xterm-helper-textarea');
           if (textarea) {{
             textarea.focus();
             return true;
           }}
-          // Also try focusing the terminal container
           const term = document.querySelector('.xterm');
           if (term) {{
             term.focus();
@@ -872,12 +882,18 @@ class LocalServer:
           }}
           return false;
         }}
-        // Try immediately and with delays as terminal initializes async
-        if (!focusTerminal()) {{
-          setTimeout(focusTerminal, 100);
-          setTimeout(focusTerminal, 500);
-          setTimeout(focusTerminal, 1000);
+
+        function initTerminal() {{
+          patchTerminal();
+          focusTerminal();
         }}
+
+        // Try immediately and with delays as terminal initializes async
+        initTerminal();
+        setTimeout(initTerminal, 100);
+        setTimeout(initTerminal, 500);
+        setTimeout(initTerminal, 1000);
+
         // Also focus on window focus (when switching tabs back)
         window.addEventListener('focus', focusTerminal);
       }})();
