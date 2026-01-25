@@ -30,6 +30,20 @@ Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to
 - **No Authentication** - this is meant to be used inside a dedicated container, and you should set up an authenticating reverse proxy like `authelia`
 - **No Encryption (TLS/HTTPS)** - again, this is meant to be fronted by something like `traefik` or `caddy`
 
+## Installation
+
+Install from PyPI:
+
+```bash
+pip install textual-webterm
+```
+
+Or install directly from GitHub:
+
+```bash
+pip install git+https://github.com/rcarmo/textual-webterm.git
+```
+
 ## Quick Start
 
 ### Serve a Terminal
