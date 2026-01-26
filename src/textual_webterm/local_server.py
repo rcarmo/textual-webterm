@@ -346,9 +346,9 @@ class LocalServer:
         if msg_type == "stdin":
             await self._handle_stdin(envelope, route_key, ws)
         elif msg_type == "resize":
-            if not session_created and await self._handle_resize(envelope, route_key, ws):
-                session_created = True
-            elif session_created:
+            if not session_created:
+                session_created = await self._handle_resize(envelope, route_key, ws)
+            else:
                 await self._handle_resize(envelope, route_key, ws)
         elif msg_type == "ping":
             await self._handle_ping(envelope, route_key, ws)

@@ -62,7 +62,17 @@ class Poller(Thread):
             self._write_queues[file_descriptor] = deque()
         new_write = Write(data)
         self._write_queues[file_descriptor].append(new_write)
-        self._selector.modify(file_descriptor, selectors.EVENT_READ | selectors.EVENT_WRITE)
+        try:
+
+            self._selector.modify(file_descriptor, selectors.EVENT_READ | selectors.EVENT_WRITE)
+
+        except KeyError:
+
+            # File descriptor removed concurrently
+
+            new_write.done_event.set()
+
+            return
         await new_write.done_event.wait()
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:

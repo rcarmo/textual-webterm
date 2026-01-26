@@ -679,6 +679,19 @@ class TestLocalServerMoreCoverage:
         session.send_bytes.assert_awaited_once_with(b"")
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    async def test_dispatch_ws_message_resize_existing_session_flag_false(self, server_with_no_apps, monkeypatch):
+        session = MagicMock()
+        session.set_terminal_size = AsyncMock()
+        monkeypatch.setattr(server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session)
+
+        ws = MagicMock()
+        created = await server_with_no_apps._dispatch_ws_message(
+            ["resize", {"width": 100, "height": 50}], "rk", ws, False
+        )
+        assert created is False
+        session.set_terminal_size.assert_awaited_once_with(100, 50)
+
     async def test_dispatch_ws_message_resize_updates_existing_session(self, server_with_no_apps, monkeypatch):
         session = MagicMock()
         session.set_terminal_size = AsyncMock()

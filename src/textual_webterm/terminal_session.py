@@ -253,9 +253,13 @@ class TerminalSession(Session):
                 os.close(fd)
 
     async def send_bytes(self, data: bytes) -> bool:
-        if self.master_fd is None:
+        fd = self.master_fd
+        if fd is None:
             return False
-        await self.poller.write(self.master_fd, data)
+        try:
+            await self.poller.write(fd, data)
+        except (KeyError, OSError):
+            return False
         return True
 
     async def send_meta(self, data: Meta) -> bool:

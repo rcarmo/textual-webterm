@@ -72,6 +72,17 @@ class TestPoller:
             poller.remove_file(999)
 
     @pytest.mark.asyncio
+    async def test_write_handles_removed_fd(self):
+        poller = Poller()
+        poller._loop = asyncio.get_event_loop()
+
+        with patch.object(poller._selector, "register"):
+            poller.add_file(42)
+
+        with patch.object(poller._selector, "modify", side_effect=KeyError()):
+            await poller.write(42, b"test")
+
+    @pytest.mark.asyncio
     async def test_write_creates_queue(self):
         """Test that write creates a write queue if needed."""
         poller = Poller()

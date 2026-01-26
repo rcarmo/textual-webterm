@@ -289,6 +289,18 @@ class TestTerminalSession:
         mock_exit.assert_called_once_with(1)
 
     @pytest.mark.asyncio
+    async def test_send_bytes_handles_closed_fd(self):
+        from textual_webterm.terminal_session import TerminalSession
+
+        poller = MagicMock()
+        poller.write = AsyncMock(side_effect=KeyError)
+        session = TerminalSession(poller, "sid", "bash")
+        session.master_fd = 10
+
+        ok = await session.send_bytes(b"test")
+        assert ok is False
+
+    @pytest.mark.asyncio
     async def test_run_reads_from_poller_and_closes(self):
         from textual_webterm.terminal_session import TerminalSession
 
