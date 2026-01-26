@@ -402,23 +402,27 @@ Not yet started. This would be a separate project (`textual-webterm-go`) providi
 
 This section compares the Python **pyte** terminal emulator and the Go **GoPyte** emulator (per their upstream documentation/README). The focus is on feature parity, Unicode handling, performance expectations, and integration risk for textual-webterm.
 
-### Feature Matrix (High-Level)
+### Feature Matrix (Detailed)
 
-| Capability | pyte (Python) | GoPyte (Go) | Notes / Risks |
-|-----------|---------------|-------------|---------------|
-| **Terminal standards** | VTXXX/ANSI (VT100-style) | VT100/VT220/ANSI (claims) | GoPyte scope may differ; verify DEC private modes. |
-| **Screen buffer model** | In-memory Screen buffer (sparse-like cells) | In-memory Screen buffer | Both expose per-cell attributes, but data model differs. |
-| **Alternate screen** | Supported (via Screen classes) | Supported (claims) | Validate behavior with full-screen apps (vim, less). |
-| **Scrollback/history** | HistoryScreen class (limited, configurable) | Built-in scrollback (claims) | Ensure scrollback size/cost acceptable. |
-| **Resize behavior** | Resizes screen + cursor + dirty state | Resizes screen + content (claims) | Validate content preservation on resize. |
-| **SGR attributes** | Bold, underline, reverse, color | SGR attributes (claims) | Verify complete SGR coverage (e.g., faint, italics). |
-| **Colors** | ANSI color codes supported | ANSI color codes supported | 256-color/truecolor support must be verified. |
-| **Unicode width** | Uses `wcwidth`/unicode width | Uses `go-runewidth` | Emoji and East Asian width differences likely. |
-| **Performance** | Pure Python, adequate for most loads | Go, claims high throughput | Benchmark with real terminal workloads. |
-| **API stability** | Mature, widely used | Newer, smaller ecosystem | Risk: breaking API changes or missing features. |
-| **Testing** | Mature test suite | Claims high coverage | Validate critical sequences for our use. |
+| Capability | pyte (Python) | GoPyte (Go) | Relevance to terminal capture | Gaps / Risks |
+|-----------|---------------|-------------|-------------------------------|--------------|
+| **Terminal standards** | VTXXX/ANSI (VT100-style) | VT100/VT220/ANSI (claims) | Core escape parsing for screen state | Verify DEC private modes & OSC support. |
+| **Screen buffer** | Screen + HistoryScreen classes | Screen buffer (claims) | Required for SVG snapshot state | Data model differences may affect attributes. |
+| **Alt screen** | Supported | Supported (claims) | Full-screen apps (vim/less/htop) | Must validate mode switching correctness. |
+| **Scrollback/history** | HistoryScreen (configurable) | Built-in scrollback (claims) | Useful for replay + screenshots | Size/perf tradeoffs; semantics differ. |
+| **Resize handling** | Resizes + cursor + dirty state | Resizes + content (claims) | Correct dimensions for SVG | Content preservation on resize is critical. |
+| **SGR attributes** | Bold/underline/reverse/color | SGR attrs (claims) | SVG text styling | Verify italics/faint/strikethrough. |
+| **Color depth** | ANSI + 256 + (truecolor in practice) | ANSI + 256? (verify) | Accurate screenshots | Truecolor/24-bit must be validated. |
+| **Unicode & width** | `wcwidth`-style width | `go-runewidth` | Glyph positioning | Emoji/CJK width divergence is likely. |
+| **Combining marks** | Handled via Unicode rules | Depends on runewidth | Accuracy of grapheme clusters | May require additional grapheme handling. |
+| **Dirty tracking** | Exposes dirty flag set | Unknown (likely missing) | Screenshot cache invalidation | May need manual diff tracking in Go. |
+| **Hyperlinks (OSC 8)** | Not explicit in docs | Unknown | Optional for capture | Lower priority but worth checking. |
+| **DEC modes** | Partial (VTXXX scope) | Unknown | Full-screen apps | Validate cursor keys, keypad modes. |
+| **Performance** | Python, moderate throughput | Go, claims high throughput | Large-output sessions | Benchmark with 100k+ lines. |
+| **API stability** | Mature, widely used | Newer, smaller ecosystem | Maintenance risk | Potential breaking changes. |
+| **Test coverage** | Mature test suite | Claims high coverage | Regression risk | Must run our own suite. |
 
-### Unicode & Emoji Handling
+### Unicode & Emoji Handling (Required for Capture Quality)
 
 **pyte**
 - Uses Python Unicode + width calculation (via `wcwidth`-style logic).
@@ -429,10 +433,11 @@ This section compares the Python **pyte** terminal emulator and the Go **GoPyte*
 - Width differences vs `wcwidth` may cause rendering mismatches in SVG screenshots.
 
 **Impact for textual-webterm**
-- Any width mismatch affects glyph positioning in screenshots.
-- We must validate CJK/emoji rendering across browsers and SVG output.
+- Width mismatches affect SVG x-coordinates (misaligned screenshots).
+- Emoji sequences (ZWJ, variation selectors) can render as multi-cell in one library and single-cell in another.
+- Must test CJK + emoji + combining marks against our SVG exporter.
 
-### Performance & Memory
+### Performance & Memory (Capture-Heavy Workloads)
 
 **pyte**
 - Pure Python; adequate for typical terminal workloads.
@@ -442,7 +447,7 @@ This section compares the Python **pyte** terminal emulator and the Go **GoPyte*
 - Go implementation; upstream claims high throughput.
 - Performance depends heavily on screen model + allocation strategy.
 
-**Action**: Benchmark with real workloads (large scrollback, fast output).
+**Action**: Benchmark with real workloads (fast output, scrollback growth, frequent screenshots).
 
 ### Maintenance & Maturity
 
@@ -455,6 +460,19 @@ This section compares the Python **pyte** terminal emulator and the Go **GoPyte*
 - Claimed feature set is promising but less battle-tested.
 
 **Action**: Track issue backlog and recent activity before committing.
+
+### Required Features for textual-webterm Capture
+
+We rely on the emulator for **accurate screenshot state**, not just live display. Required features:
+
+- **Stable screen buffer** with per-cell fg/bg/bold/underline/reverse.
+- **Accurate cursor position** after control sequences and resizes.
+- **Alt screen correctness** for full-screen TUIs.
+- **Consistent Unicode width** for precise SVG positioning.
+- **Dirty tracking or diffability** to avoid re-rendering unchanged screens.
+- **Reliable color mapping** (ANSI 16 + 256 + truecolor).
+
+If any of these are missing or inconsistent, screenshots will be wrong.
 
 ### Known Gaps / Validation Checklist
 
@@ -473,6 +491,16 @@ Before relying on GoPyte for parity, verify:
 - **Dirty tracking**: pyte exposes dirty state; GoPyte may need explicit diff tracking for efficient screenshot caching.
 - **Color translation**: Ensure SGR parsing aligns with our ANSI palette and truecolor handling.
 - **Replay buffer**: Our replay buffer is independent, but needs to coordinate with screen state updates for consistent screenshots.
+
+### Alternatives (Brief)
+
+If GoPyte does not meet parity, consider:
+
+- **govte** (`github.com/cliofy/govte`): Xterm-like parser/buffer; appears more comprehensive but less documented.
+- **vito/vt100**: Lightweight VT100 emulator, limited scrollback/alt-screen support.
+- **xyproto/vt100**: Focused on TUI canvas; not a drop-in emulator.
+
+These alternatives would still need feature validation for capture parity.
 
 ---
 
