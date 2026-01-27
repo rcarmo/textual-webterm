@@ -587,7 +587,7 @@ class LocalServer:
                 except asyncio.TimeoutError:
                     # Send keepalive comment
                     await response.write(b": keepalive\n\n")
-                except (ConnectionResetError, ConnectionAbortedError):
+                except (ConnectionResetError, ConnectionAbortedError, aiohttp.ClientConnectionError):
                     break
         finally:
             self._sse_subscribers.remove(queue)
@@ -855,7 +855,7 @@ class LocalServer:
 </head>
 <body>
     <div id=\"terminal\" class=\"textual-terminal\" data-session-websocket-url=\"{ws_url}\" data-font-size=\"16\" data-scrollback=\"1000\"></div>
-    <script src=\"/static/js/terminal.js\"></script>
+    <script type=\"module\" src=\"/static/js/terminal.js\"></script>
 </body>
 </html>"""
         return web.Response(text=html_content, content_type="text/html")
