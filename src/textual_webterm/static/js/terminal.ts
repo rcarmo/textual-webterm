@@ -54,6 +54,8 @@ class WebTerminal {
   private fitAddon: FitAddon;
   private element: HTMLElement;
   private wsUrl: string;
+  private resizeObserver: ResizeObserver | null = null;
+  private resizeRaf = 0;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
@@ -115,9 +117,13 @@ class WebTerminal {
       this.send(["resize", { width: cols, height: rows }]);
     });
 
-    // Fit to container and handle window resize
-    this.fit();
-    window.addEventListener("resize", () => this.fit());
+    // Fit to container and handle resize changes
+    this.scheduleFit();
+    window.addEventListener("resize", () => this.scheduleFit());
+    if (window.ResizeObserver) {
+      this.resizeObserver = new ResizeObserver(() => this.scheduleFit());
+      this.resizeObserver.observe(container);
+    }
 
     // Connect WebSocket
     this.connect();
@@ -130,6 +136,16 @@ class WebTerminal {
     } catch {
       // Ignore fit errors during initialization
     }
+  }
+
+  private scheduleFit(): void {
+    if (this.resizeRaf) {
+      return;
+    }
+    this.resizeRaf = window.requestAnimationFrame(() => {
+      this.resizeRaf = 0;
+      this.fit();
+    });
   }
 
   /** Connect to WebSocket server */
@@ -227,6 +243,14 @@ class WebTerminal {
 
   /** Clean up resources */
   dispose(): void {
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
+    if (this.resizeRaf) {
+      window.cancelAnimationFrame(this.resizeRaf);
+      this.resizeRaf = 0;
+    }
     this.socket?.close();
     this.terminal.dispose();
   }
