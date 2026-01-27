@@ -117,6 +117,8 @@ class WebTerminal {
       this.send(["resize", { width: cols, height: rows }]);
     });
 
+    this.ensureInitialFit();
+
     // Fit to container and handle resize changes
     this.scheduleFit();
     window.addEventListener("resize", () => this.scheduleFit());
@@ -127,6 +129,21 @@ class WebTerminal {
 
     // Connect WebSocket
     this.connect();
+  }
+
+  private ensureInitialFit(): void {
+    if (!("fonts" in document)) {
+      return;
+    }
+    const fontSet = document.fonts;
+    if (fontSet.status === "loaded") {
+      return;
+    }
+    fontSet.ready
+      .then(() => this.scheduleFit())
+      .catch(() => {
+        // Ignore font readiness errors; resize observer will handle future resizes.
+      });
   }
 
   /** Fit terminal to container size */
@@ -162,11 +179,26 @@ class WebTerminal {
       this.element.classList.add("-connected");
       this.element.classList.remove("-disconnected");
 
-      // Send initial size
+      // Send initial size.
+      // Important: avoid sending a bogus early resize before fonts/layout settle,
+      // otherwise the PTY will hard-wrap output at the wrong column count.
       this.fit();
-      const dims = this.fitAddon.proposeDimensions();
-      if (dims) {
-        this.send(["resize", { width: dims.cols, height: dims.rows }]);
+      const sendResize = () => {
+        const dims = this.fitAddon.proposeDimensions();
+        if (dims) {
+          this.send(["resize", { width: dims.cols, height: dims.rows }]);
+        }
+      };
+
+      if ("fonts" in document) {
+        document.fonts.ready
+          .then(() => {
+            this.scheduleFit();
+            sendResize();
+          })
+          .catch(() => sendResize());
+      } else {
+        sendResize();
       }
 
       // Focus terminal
