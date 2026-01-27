@@ -849,8 +849,15 @@ class LocalServer:
     <link rel=\"stylesheet\" href=\"/static/css/xterm.css\">
     <link rel=\"stylesheet\" href=\"/static/monospace.css\">
     <style>
-      body {{ background: #0c181f; margin: 0; padding: 0; }}
-      .textual-terminal {{ width: 100vw; height: 100vh; }}
+      html, body {{ width: 100%; height: 100%; }}
+      body {{ background: #0c181f; margin: 0; padding: 0; overflow: hidden; }}
+      .textual-terminal {{ width: 100%; height: 100%; }}
+      .textual-terminal .xterm,
+      .textual-terminal .xterm-viewport,
+      .textual-terminal .xterm-screen {{
+        width: 100%;
+        height: 100%;
+      }}
     </style>
 </head>
 <body>
