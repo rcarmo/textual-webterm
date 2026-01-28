@@ -118,8 +118,13 @@ class TerminalSession(Session):
         async with self._screen_lock:
             width, height = await loop.run_in_executor(None, self._get_terminal_size)
             if self._screen.columns != width or self._screen.lines != height:
-                log.debug("Syncing pyte screen from %dx%d to %dx%d",
-                         self._screen.columns, self._screen.lines, width, height)
+                log.debug(
+                    "Syncing pyte screen from %dx%d to %dx%d",
+                    self._screen.columns,
+                    self._screen.lines,
+                    width,
+                    height,
+                )
                 self._screen.resize(height, width)
                 self._last_width = width
                 self._last_height = height
@@ -207,15 +212,17 @@ class TerminalSession(Session):
                 row_data = []
                 for col in range(width):
                     char = self._screen.buffer[row][col]
-                    row_data.append({
-                        "data": char.data if char.data else " ",
-                        "fg": char.fg,
-                        "bg": char.bg,
-                        "bold": char.bold,
-                        "italics": char.italics,
-                        "underscore": char.underscore,
-                        "reverse": char.reverse,
-                    })
+                    row_data.append(
+                        {
+                            "data": char.data if char.data else " ",
+                            "fg": char.fg,
+                            "bg": char.bg,
+                            "bold": char.bold,
+                            "italics": char.italics,
+                            "underscore": char.underscore,
+                            "reverse": char.reverse,
+                        }
+                    )
                 buffer.append(row_data)
             return (width, height, buffer, has_changes)
 

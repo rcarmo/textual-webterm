@@ -106,4 +106,3 @@ class Session:
             True if session is active, False otherwise.
         """
         return False
-

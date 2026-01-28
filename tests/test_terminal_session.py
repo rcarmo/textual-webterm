@@ -240,11 +240,17 @@ class TestTerminalSession:
         session = TerminalSession(mock_poller, "test-session", command)
 
         with (
-            patch("textual_webterm.terminal_session.pty.fork", return_value=(pty.CHILD, 123)) as mock_fork,
+            patch(
+                "textual_webterm.terminal_session.pty.fork", return_value=(pty.CHILD, 123)
+            ) as mock_fork,
             patch("textual_webterm.terminal_session.version", return_value="0.0.0"),
             patch("textual_webterm.terminal_session.shlex.split", wraps=shlex.split) as mock_split,
-            patch("textual_webterm.terminal_session.os.execvp", side_effect=OSError()) as mock_execvp,
-            patch("textual_webterm.terminal_session.os._exit", side_effect=SystemExit(1)) as mock_exit,
+            patch(
+                "textual_webterm.terminal_session.os.execvp", side_effect=OSError()
+            ) as mock_execvp,
+            patch(
+                "textual_webterm.terminal_session.os._exit", side_effect=SystemExit(1)
+            ) as mock_exit,
             pytest.raises(SystemExit),
         ):
             await session.open()
@@ -281,7 +287,9 @@ class TestTerminalSession:
         with (
             patch("textual_webterm.terminal_session.pty.fork", return_value=(pty.CHILD, 123)),
             patch("textual_webterm.terminal_session.shlex.split", side_effect=ValueError("bad")),
-            patch("textual_webterm.terminal_session.os._exit", side_effect=SystemExit(1)) as mock_exit,
+            patch(
+                "textual_webterm.terminal_session.os._exit", side_effect=SystemExit(1)
+            ) as mock_exit,
             pytest.raises(SystemExit),
         ):
             await session.open()
@@ -300,8 +308,10 @@ class TestTerminalSession:
         class DummyLock:
             async def __aenter__(self):
                 return None
+
             async def __aexit__(self, exc_type, exc, tb):
                 return False
+
         session._screen_lock = DummyLock()
 
         lines = await session.get_screen_lines()
@@ -317,14 +327,22 @@ class TestTerminalSession:
         session._screen.columns = 1
         session._screen.lines = 1
         session._screen.dirty = set()
-        session._screen.buffer = [[MagicMock(data=" ", fg=0, bg=0, bold=False, italics=False, underscore=False, reverse=False)]]
+        session._screen.buffer = [
+            [
+                MagicMock(
+                    data=" ", fg=0, bg=0, bold=False, italics=False, underscore=False, reverse=False
+                )
+            ]
+        ]
         session._sync_pyte_to_pty = AsyncMock()
 
         class DummyLock:
             async def __aenter__(self):
                 return None
+
             async def __aexit__(self, exc_type, exc, tb):
                 return False
+
         session._screen_lock = DummyLock()
 
         width, height, _buffer, changed = await session.get_screen_state()
@@ -342,15 +360,25 @@ class TestTerminalSession:
         session._screen.columns = 2
         session._screen.lines = 1
         session._screen.dirty = {1}
-        session._screen.buffer = [[MagicMock(data="x", fg=0, bg=0, bold=False, italics=False, underscore=False, reverse=False),
-                                   MagicMock(data="y", fg=0, bg=0, bold=False, italics=False, underscore=False, reverse=False)]]
+        session._screen.buffer = [
+            [
+                MagicMock(
+                    data="x", fg=0, bg=0, bold=False, italics=False, underscore=False, reverse=False
+                ),
+                MagicMock(
+                    data="y", fg=0, bg=0, bold=False, italics=False, underscore=False, reverse=False
+                ),
+            ]
+        ]
         session._sync_pyte_to_pty = AsyncMock()
 
         class DummyLock:
             async def __aenter__(self):
                 return None
+
             async def __aexit__(self, exc_type, exc, tb):
                 return False
+
         session._screen_lock = DummyLock()
 
         width, height, _buffer, changed = await session.get_screen_state()
@@ -367,11 +395,14 @@ class TestTerminalSession:
         session = TerminalSession(poller, "sid", "bash")
         session._screen = MagicMock()
         session._screen.dirty = {1}
+
         class DummyLock:
             async def __aenter__(self):
                 return None
+
             async def __aexit__(self, exc_type, exc, tb):
                 return False
+
         session._screen_lock = DummyLock()
         session._sync_pyte_to_pty = AsyncMock()
 

@@ -231,6 +231,7 @@ class TestRenderTerminalSvg:
         assert f'fill="{ANSI_COLORS["green"]}"' in svg
         # Check rect exists with green fill
         import re
+
         rect_match = re.search(r'<rect[^>]*fill="{}"[^>]*/>'.format(ANSI_COLORS["green"]), svg)
         assert rect_match is not None
 
@@ -248,11 +249,13 @@ class TestRenderTerminalSvg:
 
     def test_background_color_multiple_spans(self) -> None:
         """Multiple background colors in same row render correctly."""
-        buffer = [[
-            self._char("R", bg="red"),
-            self._char("G", bg="green"),
-            self._char("B", bg="blue"),
-        ]]
+        buffer = [
+            [
+                self._char("R", bg="red"),
+                self._char("G", bg="green"),
+                self._char("B", bg="blue"),
+            ]
+        ]
         svg = render_terminal_svg(buffer, width=80, height=24)
         assert f'fill="{ANSI_COLORS["red"]}"' in svg
         assert f'fill="{ANSI_COLORS["green"]}"' in svg
@@ -262,17 +265,21 @@ class TestRenderTerminalSvg:
 
     def test_background_color_wide_char(self) -> None:
         """Background color on wide character spans correct width."""
-        buffer = [[
-            self._char("中", bg="red"),
-            self._char("", bg="red"),  # Placeholder inherits bg
-        ]]
+        buffer = [
+            [
+                self._char("中", bg="red"),
+                self._char("", bg="red"),  # Placeholder inherits bg
+            ]
+        ]
         svg = render_terminal_svg(buffer, width=80, height=24, char_width=10.0)
         # Background should span 2 columns (20px width + 0.5px overlap)
         assert f'fill="{ANSI_COLORS["red"]}"' in svg
         # Verify rect width is for 2 columns plus overlap
         import re
-        rect_match = re.search(r'<rect[^>]*width="(\d+\.?\d*)"[^>]*fill="{}"/>'
-                              .format(ANSI_COLORS["red"]), svg)
+
+        rect_match = re.search(
+            r'<rect[^>]*width="(\d+\.?\d*)"[^>]*fill="{}"/>'.format(ANSI_COLORS["red"]), svg
+        )
         assert rect_match is not None
         width = float(rect_match.group(1))
         assert width == 20.5  # 2 columns * 10.0 char_width + 0.5 overlap
@@ -300,7 +307,7 @@ class TestRenderTerminalSvg:
         buffer = [[self._char("│")]]  # Vertical line
         svg = render_terminal_svg(buffer, width=80, height=24)
         # Box drawing chars rendered with transform for vertical scaling
-        assert 'scale(1,1.2)' in svg
+        assert "scale(1,1.2)" in svg
         # Should be a separate text element, not a tspan
         assert '<text x="' in svg
 
@@ -309,7 +316,7 @@ class TestRenderTerminalSvg:
         buffer = [[self._char("┌"), self._char("┐")]]
         svg = render_terminal_svg(buffer, width=80, height=24)
         # Both corners should have scale transforms
-        assert svg.count('scale(1,1.2)') == 2
+        assert svg.count("scale(1,1.2)") == 2
 
     def test_unicode_text(self) -> None:
         """Unicode text is preserved."""
@@ -368,7 +375,7 @@ class TestRenderTerminalSvg:
     def test_custom_background(self) -> None:
         """Custom background color is applied."""
         svg = render_terminal_svg([], width=80, height=24, background="#1a1a1a")
-        assert 'fill: #1a1a1a' in svg
+        assert "fill: #1a1a1a" in svg
 
     def test_style_definitions_present(self) -> None:
         """CSS style definitions are included."""
@@ -434,8 +441,19 @@ class TestSvgStructure:
 
     def test_all_tags_closed(self) -> None:
         """All opened tags are properly closed."""
-        buffer = [[{"data": "X", "fg": "red", "bg": "blue", "bold": True,
-                   "italics": False, "underscore": False, "reverse": False}]]
+        buffer = [
+            [
+                {
+                    "data": "X",
+                    "fg": "red",
+                    "bg": "blue",
+                    "bold": True,
+                    "italics": False,
+                    "underscore": False,
+                    "reverse": False,
+                }
+            ]
+        ]
         svg = render_terminal_svg(buffer, width=80, height=24)
 
         # Count opening and closing tags
@@ -525,11 +543,13 @@ class TestEdgeCases:
 
     def test_special_unicode_blocks(self) -> None:
         """Unicode box drawing characters render (separately for precise positioning)."""
-        buffer = [[
-            self._char("┌"),
-            self._char("─"),
-            self._char("┐"),
-        ]]
+        buffer = [
+            [
+                self._char("┌"),
+                self._char("─"),
+                self._char("┐"),
+            ]
+        ]
         svg = render_terminal_svg(buffer, width=3, height=1)
         # Box drawing chars are rendered separately for precise x positioning
         assert "┌" in svg
@@ -538,24 +558,32 @@ class TestEdgeCases:
 
     def test_horizontal_lines_render_without_textlength(self) -> None:
         """Horizontal lines render without textLength (removed due to positioning issues)."""
-        buffer = [[
-            self._char("╭"),
-            self._char("─"),
-            self._char("─"),
-            self._char("─"),
-            self._char("╮"),
-        ]]
+        buffer = [
+            [
+                self._char("╭"),
+                self._char("─"),
+                self._char("─"),
+                self._char("─"),
+                self._char("╮"),
+            ]
+        ]
         svg = render_terminal_svg(buffer, width=5, height=1)
         # Horizontal lines should NOT have textLength (causes visual offset issues)
-        assert 'textLength=' not in svg
-        assert 'lengthAdjust=' not in svg
+        assert "textLength=" not in svg
+        assert "lengthAdjust=" not in svg
         # But the characters should still be present
         assert "─" in svg or "───" in svg
 
     def test_ansi_bright_colors(self) -> None:
         """All bright ANSI colors render."""
-        colors = ["brightred", "brightgreen", "brightyellow",
-                  "brightblue", "brightmagenta", "brightcyan"]
+        colors = [
+            "brightred",
+            "brightgreen",
+            "brightyellow",
+            "brightblue",
+            "brightmagenta",
+            "brightcyan",
+        ]
         buffer = [[self._char("X", fg=c) for c in colors]]
         svg = render_terminal_svg(buffer, width=len(colors), height=1)
         for color in colors:
@@ -571,8 +599,13 @@ class TestEdgeCases:
 
     def test_all_attributes_at_once(self) -> None:
         """Character with all attributes renders."""
-        buffer = [[self._char("X", fg="red", bg="blue", bold=True,
-                             italics=True, underscore=True, reverse=True)]]
+        buffer = [
+            [
+                self._char(
+                    "X", fg="red", bg="blue", bold=True, italics=True, underscore=True, reverse=True
+                )
+            ]
+        ]
         svg = render_terminal_svg(buffer, width=1, height=1)
         assert "bold" in svg
         assert "italic" in svg

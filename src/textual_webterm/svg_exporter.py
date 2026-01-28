@@ -178,8 +178,7 @@ def render_terminal_svg(
 
     # Background rectangle
     parts.append(
-        f'<rect class="terminal-bg" x="0" y="0" '
-        f'width="{svg_width:.1f}" height="{svg_height:.1f}"/>'
+        f'<rect class="terminal-bg" x="0" y="0" width="{svg_width:.1f}" height="{svg_height:.1f}"/>'
     )
 
     # Text content group
@@ -261,10 +260,10 @@ def render_terminal_svg(
                 row_bg_rects.append(
                     f'<text x="{x:.1f}" y="{text_y:.1f}" '
                     f'transform="translate(0,{rect_y:.1f}) scale(1,{line_height}) translate(0,{-rect_y:.1f})"'
-                    f'{fill_attr}{class_attr}>{_escape_xml(char_data)}</text>'
+                    f"{fill_attr}{class_attr}>{_escape_xml(char_data)}</text>"
                 )
             else:
-                row_tspans.append(f'<tspan {" ".join(attrs)}>{_escape_xml(char_data)}</tspan>')
+                row_tspans.append(f"<tspan {' '.join(attrs)}>{_escape_xml(char_data)}</tspan>")
 
             col += char_cols
 

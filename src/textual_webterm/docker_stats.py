@@ -40,9 +40,7 @@ POLL_INTERVAL = 10.0  # Seconds between polls
 class DockerStatsCollector:
     """Collects CPU stats from Docker containers via the Docker socket."""
 
-    def __init__(
-        self, socket_path: str | None = None, compose_project: str | None = None
-    ) -> None:
+    def __init__(self, socket_path: str | None = None, compose_project: str | None = None) -> None:
         self._socket_path = socket_path or get_docker_socket_path()
         self._compose_project = compose_project
         # container_name -> deque of CPU % values (0-100)
@@ -184,7 +182,11 @@ class DockerStatsCollector:
                         break
 
         if mapping:
-            log.debug("Discovered %d containers for stats (project=%s)", len(mapping), self._compose_project)
+            log.debug(
+                "Discovered %d containers for stats (project=%s)",
+                len(mapping),
+                self._compose_project,
+            )
 
         return mapping
 

@@ -94,7 +94,7 @@ textual-webterm --theme dracula --font-size 18
 textual-webterm --theme nord --font-family "JetBrains Mono, monospace"
 ```
 
-Available themes: `monokai` (default), `dark`, `light`, `dracula`, `catppuccin`, `nord`, `gruvbox`, `solarized`, `tokyo`.
+Available themes: `xterm` (default), `monokai`, `dark`, `light`, `dracula`, `catppuccin`, `nord`, `gruvbox`, `solarized`, `tokyo`.
 
 Then open http://localhost:8080 in your browser.
 
@@ -113,6 +113,36 @@ Run with:
 ```bash
 textual-webterm --landing-manifest landing.yaml
 ```
+
+### Docker Watch Mode
+
+Watch for Docker containers with the `webterm-command` label and dynamically add/remove terminal sessions:
+
+```bash
+textual-webterm --docker-watch
+```
+
+When a container starts with the label, it automatically appears in the dashboard. When it stops, it's removed. Label values:
+
+- `webterm-command: auto` - Runs `docker exec -it <container> /bin/bash`
+- `webterm-command: <command>` - Runs the specified command
+
+Example docker-compose.yaml:
+
+```yaml
+services:
+  myapp:
+    image: myapp:latest
+    labels:
+      webterm-command: auto  # Opens bash in container
+  
+  logs:
+    image: myapp:latest  
+    labels:
+      webterm-command: docker logs -f myapp  # Shows logs
+```
+
+**Requires**: Docker socket access (`-v /var/run/docker.sock:/var/run/docker.sock`)
 
 ### Docker Compose Integration
 
@@ -137,6 +167,7 @@ In compose mode, the dashboard displays **CPU sparklines** showing 30 minutes of
 ### Dashboard Features
 
 - **Live screenshots** - Terminal thumbnails update in real-time via SSE when activity occurs
+- **Dynamic updates** - In docker-watch mode, tiles appear/disappear as containers start/stop
 - **CPU sparklines** - Mini charts showing container CPU usage (compose mode only)
 - **Tab reuse** - Clicking the same tile reopens the existing browser tab
 - **Auto-focus** - Terminals automatically receive keyboard focus on load
@@ -159,8 +190,10 @@ Options:
                                 (slug/name/command).
   -C, --compose-manifest PATH   Docker compose YAML; services with label
                                 "webterm-command" become landing tiles.
-  -t, --theme TEXT              Terminal color theme [default: monokai]
-                                Options: monokai, dark, light, dracula,
+  -D, --docker-watch            Watch Docker for containers with
+                                "webterm-command" label (dynamic mode).
+  -t, --theme TEXT              Terminal color theme [default: xterm]
+                                Options: xterm, monokai, dark, light, dracula,
                                 catppuccin, nord, gruvbox, solarized, tokyo
   -f, --font-family TEXT        Terminal font family (CSS font stack)
   -s, --font-size INTEGER       Terminal font size in pixels [default: 16]
@@ -172,10 +205,11 @@ Options:
 
 | Endpoint | Description |
 |----------|-------------|
-| `/` | Dashboard (with manifest) or terminal view |
+| `/` | Dashboard (with manifest/docker-watch) or terminal view |
 | `/ws/{route_key}` | WebSocket for terminal I/O |
 | `/screenshot.svg?route_key=...` | SVG screenshot of terminal |
 | `/cpu-sparkline.svg?container=...` | CPU sparkline SVG (compose mode) |
+| `/tiles` | JSON list of current tiles (for dynamic dashboards) |
 | `/events` | SSE stream for activity notifications |
 | `/health` | Health check endpoint |
 

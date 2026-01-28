@@ -139,6 +139,7 @@ class LocalServer:
         landing_apps: list | None = None,
         compose_mode: bool = False,
         compose_project: str | None = None,
+        docker_watch_mode: bool = False,
         theme: str = "xterm",
         font_family: str | None = None,
         font_size: int = 16,
@@ -166,6 +167,7 @@ class LocalServer:
         self._landing_apps = landing_apps or []
         self._compose_mode = compose_mode
         self._compose_project = compose_project
+        self._docker_watch_mode = docker_watch_mode
 
         self._screenshot_cache: dict[str, tuple[float, str]] = {}
         self._screenshot_cache_etag: dict[str, str] = {}
@@ -178,6 +180,8 @@ class LocalServer:
 
         # Docker stats collector (only used in compose mode)
         self._docker_stats: DockerStatsCollector | None = None
+        # Docker watcher (only used in docker watch mode)
+        self._docker_watcher = None
         self._slug_to_service: dict[str, str] = {}
 
     @property
@@ -262,6 +266,7 @@ class LocalServer:
             web.get("/cpu-sparkline.svg", self._handle_cpu_sparkline),
             web.get("/events", self._handle_sse),
             web.get("/health", self._handle_health_check),
+            web.get("/tiles", self._handle_tiles),
             web.get("/", self._handle_root),
         ]
 
@@ -269,7 +274,9 @@ class LocalServer:
             routes.append(web.static("/static", WEBTERM_STATIC_PATH))
             log.info("Static assets served from: %s", WEBTERM_STATIC_PATH)
         else:
-            log.error("Static assets not found at %s - terminal UI will not work", WEBTERM_STATIC_PATH)
+            log.error(
+                "Static assets not found at %s - terminal UI will not work", WEBTERM_STATIC_PATH
+            )
 
         return routes
 
@@ -301,27 +308,55 @@ class LocalServer:
 
             # Start Docker stats collector in compose mode
             if self._compose_mode and self._landing_apps:
-                self._docker_stats = DockerStatsCollector(
-                    compose_project=self._compose_project
-                )
+                self._docker_stats = DockerStatsCollector(compose_project=self._compose_project)
                 if self._docker_stats.available:
                     # Pass service names (not slugs) for Docker matching
                     service_names = [app.name for app in self._landing_apps]
                     self._docker_stats.start(service_names)
                     # Create slug->name mapping for lookups
-                    self._slug_to_service = {
-                        app.slug: app.name for app in self._landing_apps
-                    }
+                    self._slug_to_service = {app.slug: app.name for app in self._landing_apps}
                     log.info("Slug to service mapping: %s", self._slug_to_service)
                     stack.push_async_callback(self._docker_stats.stop)
+
+            # Start Docker watcher in docker watch mode
+            if self._docker_watch_mode:
+                from .docker_watcher import DockerWatcher
+
+                self._docker_watcher = DockerWatcher(
+                    self.session_manager,
+                    on_container_added=self._on_docker_container_added,
+                    on_container_removed=self._on_docker_container_removed,
+                )
+                await self._docker_watcher.start()
+                stack.push_async_callback(self._docker_watcher.stop)
 
             site = web.TCPSite(runner, self.host, self.port)
             await site.start()
 
             log.info("Local server started on %s:%s", self.host, self.port)
-            log.info("Available apps: %s", ", ".join(app.name for app in self.session_manager.apps))
+            if self._docker_watch_mode:
+                log.info("Docker watch mode: sessions added dynamically from labeled containers")
+            else:
+                log.info(
+                    "Available apps: %s", ", ".join(app.name for app in self.session_manager.apps)
+                )
 
             await self.exit_event.wait()
+
+    def _on_docker_container_added(self, slug: str, name: str, command: str) -> None:
+        """Callback when a Docker container is added."""
+        log.info("Container added to dashboard: %s -> %s", name, slug)
+        # Notify SSE subscribers about dashboard change
+        self._notify_activity("__dashboard__")
+
+    def _on_docker_container_removed(self, slug: str) -> None:
+        """Callback when a Docker container is removed."""
+        log.info("Container removed from dashboard: %s", slug)
+        # Invalidate any cached screenshots
+        self._screenshot_cache.pop(slug, None)
+        self._screenshot_cache_etag.pop(slug, None)
+        # Notify SSE subscribers about dashboard change
+        self._notify_activity("__dashboard__")
 
     async def _handle_stdin(
         self, envelope: list, route_key: str, _ws: web.WebSocketResponse
@@ -396,15 +431,14 @@ class LocalServer:
                 session = None
             else:
                 # Force terminal redraw on reconnect to avoid blank screen
-                if hasattr(session, 'force_redraw'):
+                if hasattr(session, "force_redraw"):
                     await session.force_redraw()
-                if hasattr(session, 'send_bytes'):
-                    await session.send_bytes(CLEAR_AND_REDRAW_SEQ.encode('utf-8'))
-
+                if hasattr(session, "send_bytes"):
+                    await session.send_bytes(CLEAR_AND_REDRAW_SEQ.encode("utf-8"))
 
         session_created = session_id is not None
 
-        if session_created and session is not None and hasattr(session, 'get_replay_buffer'):
+        if session_created and session is not None and hasattr(session, "get_replay_buffer"):
             replay = await session.get_replay_buffer()
             if replay:
                 await ws.send_bytes(replay)
@@ -608,7 +642,11 @@ class LocalServer:
                 except asyncio.TimeoutError:
                     # Send keepalive comment
                     await response.write(b": keepalive\n\n")
-                except (ConnectionResetError, ConnectionAbortedError, aiohttp.ClientConnectionError):
+                except (
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                    aiohttp.ClientConnectionError,
+                ):
                     break
         finally:
             self._sse_subscribers.remove(queue)
@@ -620,6 +658,7 @@ class LocalServer:
 
     def _get_ws_url_from_request(self, request: web.Request, route_key: str) -> str:
         """Build WebSocket URL honoring reverse proxies and port mapping."""
+
         # Extract forwarded headers (take first value if comma-separated)
         def first_header(name: str) -> str:
             return request.headers.get(name, "").split(",")[0].strip().lower()
@@ -658,16 +697,40 @@ class LocalServer:
             return f"{ws_proto}://{ws_host}:{self.port}/ws/{route_key}"
         return f"{ws_proto}://{ws_host}/ws/{route_key}"
 
+    async def _handle_tiles(self, request: web.Request) -> web.Response:
+        """Return current tiles as JSON (for dynamic dashboard updates)."""
+        if self._docker_watch_mode:
+            apps_for_dashboard = self.session_manager.apps
+        else:
+            apps_for_dashboard = self._landing_apps
+
+        tiles = [
+            {"slug": app.slug, "name": app.name, "command": app.command}
+            for app in apps_for_dashboard
+        ]
+        return web.json_response(tiles)
+
     async def _handle_root(self, request: web.Request) -> web.Response:
         route_key_param = request.query.get("route_key")
 
-        if self._landing_apps and not route_key_param:
+        # Show dashboard if we have landing apps, are in docker watch mode, or explicitly have apps
+        show_dashboard = (self._landing_apps or self._docker_watch_mode) and not route_key_param
+
+        if show_dashboard:
+            # In docker watch mode, use session_manager.apps (dynamically updated)
+            # Otherwise use landing_apps
+            if self._docker_watch_mode:
+                apps_for_dashboard = self.session_manager.apps
+            else:
+                apps_for_dashboard = self._landing_apps
+
             tiles = [
                 {"slug": app.slug, "name": app.name, "command": app.command}
-                for app in self._landing_apps
+                for app in apps_for_dashboard
             ]
             tiles_json = json.dumps(tiles)
             compose_mode_js = "true" if self._compose_mode else "false"
+            docker_watch_js = "true" if self._docker_watch_mode else "false"
             html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -675,23 +738,30 @@ class LocalServer:
     <style>
         body {{ font-family: Arial, sans-serif; margin: 16px; background: #0f172a; color: #e2e8f0; }}
         h1 {{ margin-bottom: 8px; }}
+        .subtitle {{ color: #64748b; font-size: 14px; margin-bottom: 16px; }}
         .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }}
-        .tile {{ background: #1e293b; border: 1px solid #334155; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }}
+        .tile {{ background: #1e293b; border: 1px solid #334155; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.4); cursor: pointer; }}
+        .tile:hover {{ border-color: #475569; }}
         .tile-header {{ padding: 10px 12px; font-weight: bold; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; }}
         .tile-title {{ display: flex; align-items: center; gap: 8px; }}
         .sparkline {{ opacity: 0.9; }}
         .tile-body {{ padding: 0; }}
         .thumb {{ width: 100%; height: 180px; object-fit: contain; background: #0b1220; display: block; }}
-        .meta {{ padding: 8px 12px; color: #94a3b8; font-size: 12px; }}
+        .meta {{ padding: 8px 12px; color: #94a3b8; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         a {{ color: inherit; text-decoration: none; }}
+        .empty {{ color: #64748b; text-align: center; padding: 40px; }}
     </style>
 </head>
 <body>
     <h1>Sessions</h1>
+    <div class="subtitle" id="subtitle"></div>
     <div class=\"grid\" id=\"grid\"></div>
     <script>
-        const tiles = {tiles_json};
+        let tiles = {tiles_json};
         const composeMode = {compose_mode_js};
+        const dockerWatchMode = {docker_watch_js};
+        let cardsBySlug = {{}};
+
         function makeTile(tile) {{
             const card = document.createElement('div');
             card.className = 'tile';
@@ -718,6 +788,7 @@ class LocalServer:
             const meta = document.createElement('div');
             meta.className = 'meta';
             meta.innerText = tile.command;
+            meta.title = tile.command;
             body.appendChild(img);
             card.appendChild(header);
             card.appendChild(body);
@@ -729,13 +800,29 @@ class LocalServer:
             card.img = img;
             return card;
         }}
+
         const grid = document.getElementById('grid');
-        const cards = tiles.map(makeTile);
-        const cardsBySlug = {{}};
-        cards.forEach((c, i) => {{
-            grid.appendChild(c);
-            cardsBySlug[tiles[i].slug] = c;
-        }});
+        const subtitle = document.getElementById('subtitle');
+
+        function renderTiles() {{
+            grid.innerHTML = '';
+            cardsBySlug = {{}};
+            if (tiles.length === 0) {{
+                grid.innerHTML = '<div class="empty">No containers found. Start containers with the webterm-command label.</div>';
+                subtitle.textContent = dockerWatchMode ? 'Watching for containers with webterm-command label...' : '';
+                return;
+            }}
+            subtitle.textContent = dockerWatchMode ? `${{tiles.length}} container(s) found` : '';
+            tiles.forEach(tile => {{
+                const card = makeTile(tile);
+                grid.appendChild(card);
+                cardsBySlug[tile.slug] = card;
+            }});
+            refreshAll();
+        }}
+
+        // Initial render
+        renderTiles();
 
         // Refresh a single tile's screenshot
         function refreshTile(slug) {{
@@ -748,7 +835,24 @@ class LocalServer:
         function refreshAll() {{
             for (const tile of tiles) {{
                 const card = cardsBySlug[tile.slug];
-                card.img.src = `/screenshot.svg?route_key=${{encodeURIComponent(tile.slug)}}`;
+                if (card) card.img.src = `/screenshot.svg?route_key=${{encodeURIComponent(tile.slug)}}`;
+            }}
+        }}
+
+        // Fetch updated tiles list from server
+        async function refreshTilesList() {{
+            try {{
+                const resp = await fetch('/tiles');
+                const newTiles = await resp.json();
+                // Check if tiles changed
+                const oldSlugs = tiles.map(t => t.slug).sort().join(',');
+                const newSlugs = newTiles.map(t => t.slug).sort().join(',');
+                if (oldSlugs !== newSlugs) {{
+                    tiles = newTiles;
+                    renderTiles();
+                }}
+            }} catch (e) {{
+                console.error('Failed to refresh tiles:', e);
             }}
         }}
 
@@ -757,7 +861,7 @@ class LocalServer:
             if (!composeMode) return;
             for (const tile of tiles) {{
                 const card = cardsBySlug[tile.slug];
-                if (card.sparkline) {{
+                if (card && card.sparkline) {{
                     card.sparkline.src = `/cpu-sparkline.svg?container=${{encodeURIComponent(tile.slug)}}&width=80&height=16&_t=${{Date.now()}}`;
                 }}
             }}
@@ -792,7 +896,13 @@ class LocalServer:
             if (eventSource) return;
             eventSource = new EventSource('/events');
             eventSource.addEventListener('activity', (e) => {{
-                scheduleRefreshTile(e.data);
+                const slug = e.data;
+                // Special event for dashboard changes (container added/removed)
+                if (slug === '__dashboard__') {{
+                    refreshTilesList();
+                }} else {{
+                    scheduleRefreshTile(slug);
+                }}
             }});
             eventSource.onerror = () => {{
                 // Reconnect on error
@@ -800,8 +910,6 @@ class LocalServer:
                 eventSource = null;
                 setTimeout(startSSE, 2000);
             }};
-            // Initial load of all screenshots
-            refreshAll();
             // Start sparkline polling (every 30s since it's 30min history)
             if (composeMode && !sparklineTimer) {{
                 refreshSparklines();

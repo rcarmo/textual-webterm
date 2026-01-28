@@ -63,11 +63,9 @@ class Poller(Thread):
         new_write = Write(data)
         self._write_queues[file_descriptor].append(new_write)
         try:
-
             self._selector.modify(file_descriptor, selectors.EVENT_READ | selectors.EVENT_WRITE)
 
         except KeyError:
-
             # File descriptor removed concurrently
 
             new_write.done_event.set()
@@ -110,24 +108,24 @@ class Poller(Thread):
                             loop.call_soon_threadsafe(queue.put_nowait, data)
 
                     if event_mask & writeable_events:
-                            write_queue = self._write_queues.get(file_descriptor, None)
-                            if write_queue:
-                                write = write_queue[0]
-                                remaining_data = write.data[write.position :]
-                                try:
-                                    bytes_written = os.write(file_descriptor, remaining_data)
-                                except OSError:
-                                    # Write failed; signal completion anyway to unblock waiters
-                                    write_queue.popleft()
-                                    loop.call_soon_threadsafe(write.done_event.set)
-                                    continue
-                                write.position += bytes_written
-                                # Check if all data has been written
-                                if write.position >= len(write.data):
-                                    write_queue.popleft()
-                                    loop.call_soon_threadsafe(write.done_event.set)
-                            else:
-                                selector.modify(file_descriptor, readable_events)
+                        write_queue = self._write_queues.get(file_descriptor, None)
+                        if write_queue:
+                            write = write_queue[0]
+                            remaining_data = write.data[write.position :]
+                            try:
+                                bytes_written = os.write(file_descriptor, remaining_data)
+                            except OSError:
+                                # Write failed; signal completion anyway to unblock waiters
+                                write_queue.popleft()
+                                loop.call_soon_threadsafe(write.done_event.set)
+                                continue
+                            write.position += bytes_written
+                            # Check if all data has been written
+                            if write.position >= len(write.data):
+                                write_queue.popleft()
+                                loop.call_soon_threadsafe(write.done_event.set)
+                        else:
+                            selector.modify(file_descriptor, readable_events)
 
     def exit(self) -> None:
         """Exit and block until finished."""

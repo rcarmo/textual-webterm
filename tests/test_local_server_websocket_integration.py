@@ -22,7 +22,9 @@ async def _make_client(server: LocalServer) -> TestClient:
 
 @pytest.mark.asyncio
 async def test_websocket_creates_session_on_resize(tmp_path):
-    config = Config(apps=[App(name="Test", slug="test", path=".", command="echo test", terminal=True)])
+    config = Config(
+        apps=[App(name="Test", slug="test", path=".", command="echo test", terminal=True)]
+    )
     config_file = tmp_path / "config.toml"
     config_file.write_text("")
     server = LocalServer(config_path=str(config_file), config=config)
@@ -78,10 +80,11 @@ async def test_websocket_creates_session_on_resize(tmp_path):
     assert called["stdin"] == 1
 
 
-
 @pytest.mark.asyncio
 async def test_websocket_ping_pong(tmp_path):
-    config = Config(apps=[App(name="Test", slug="test", path=".", command="echo test", terminal=True)])
+    config = Config(
+        apps=[App(name="Test", slug="test", path=".", command="echo test", terminal=True)]
+    )
     config_file = tmp_path / "config.toml"
     config_file.write_text("")
     server = LocalServer(config_path=str(config_file), config=config)
@@ -102,7 +105,9 @@ async def test_websocket_ping_pong(tmp_path):
 
 @pytest.mark.asyncio
 async def test_websocket_ignores_invalid_envelopes(tmp_path):
-    config = Config(apps=[App(name="Test", slug="test", path=".", command="echo test", terminal=True)])
+    config = Config(
+        apps=[App(name="Test", slug="test", path=".", command="echo test", terminal=True)]
+    )
     config_file = tmp_path / "config.toml"
     config_file.write_text("")
     server = LocalServer(config_path=str(config_file), config=config)

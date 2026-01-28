@@ -117,6 +117,13 @@ def load_app_class(app_path: str):
     help='Docker compose YAML; services with label "webterm-command" become landing tiles.',
 )
 @click.option(
+    "--docker-watch",
+    "-D",
+    "docker_watch",
+    is_flag=True,
+    help='Watch Docker for containers with "webterm-command" label and add/remove sessions dynamically.',
+)
+@click.option(
     "--theme",
     "-t",
     help="Terminal color theme (xterm, monokai, dark, light, dracula, catppuccin, nord, gruvbox, solarized, tokyo).",
@@ -142,6 +149,7 @@ def app(
     app_path: str | None,
     landing_manifest: Path | None,
     compose_manifest: Path | None,
+    docker_watch: bool,
     theme: str,
     font_family: str | None,
     font_size: int,
@@ -157,6 +165,7 @@ def app(
         textual-webterm htop                      # Serve htop in terminal
         textual-webterm --app mymodule:MyApp      # Serve a Textual app from module
         textual-webterm -a ./calculator.py:CalculatorApp  # Serve from file
+        textual-webterm --docker-watch            # Watch Docker for labeled containers
     """
     VERSION = version("textual-webterm")
     log.info("textual-webterm v%s", VERSION)
@@ -170,6 +179,7 @@ def app(
 
     landing_apps: list = []
     is_compose_mode = False
+    is_docker_watch_mode = docker_watch
     compose_project: str | None = None
     if landing_manifest:
         landing_apps = load_landing_yaml(landing_manifest)
@@ -187,6 +197,7 @@ def app(
         landing_apps=landing_apps,
         compose_mode=is_compose_mode,
         compose_project=compose_project,
+        docker_watch_mode=is_docker_watch_mode,
         theme=theme,
         font_family=font_family,
         font_size=font_size,
@@ -230,6 +241,9 @@ def app(
         # Run command as terminal
         server.add_terminal("Terminal", command, "")
         log.info("Serving terminal: %s", command)
+    elif docker_watch:
+        # Docker watch mode - sessions added dynamically
+        log.info("Docker watch mode enabled - sessions will be added dynamically")
     elif not landing_apps:
         # Run default shell
         terminal_command = os.environ.get("SHELL", "/bin/sh")
