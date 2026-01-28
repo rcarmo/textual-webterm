@@ -9,7 +9,8 @@
     "typescript": "^5.7.0"
   },
   "scripts": {
-    "build": "bun build src/textual_webterm/static/js/terminal.ts --outfile=src/textual_webterm/static/js/terminal.js --minify --target=browser",
-    "watch": "bun build src/textual_webterm/static/js/terminal.ts --outfile=src/textual_webterm/static/js/terminal.js --watch --target=browser"
+    "build": "bun build src/textual_webterm/static/js/terminal.ts --outfile=src/textual_webterm/static/js/terminal.js --minify --target=browser && cp node_modules/ghostty-web/ghostty-vt.wasm src/textual_webterm/static/js/",
+    "watch": "bun build src/textual_webterm/static/js/terminal.ts --outfile=src/textual_webterm/static/js/terminal.js --watch --target=browser",
+    "copy-wasm": "cp node_modules/ghostty-web/ghostty-vt.wasm src/textual_webterm/static/js/"
   }
 }

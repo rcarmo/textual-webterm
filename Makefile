@@ -39,7 +39,8 @@ bundle: node_modules
 	bun run build
 
 bundle-watch: node_modules
+	bun run copy-wasm
 	bun run watch
 
 bundle-clean:
-	rm -rf node_modules bun.lockb src/textual_webterm/static/js/terminal.js
+	rm -rf node_modules bun.lock src/textual_webterm/static/js/terminal.js src/textual_webterm/static/js/ghostty-vt.wasm
