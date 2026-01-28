@@ -276,32 +276,31 @@ const THEMES: Record<string, ITheme> = {
 };
 
 /**
- * ghostty-web's internal default palette (from ghostty-web.js const q).
+ * ghostty-web's internal default palette (Tomorrow Night theme).
  * This is what the WASM terminal uses to resolve ANSI color codes to RGB.
  * We need to know these to remap them to our custom theme.
  */
 const GHOSTTY_DEFAULT_PALETTE: ITheme = {
-  foreground: "#d4d4d4",
-  background: "#1e1e1e",
-  cursor: "#ffffff",
-  cursorAccent: "#1e1e1e",
-  selectionBackground: "#264f78",
-  selectionForeground: "#d4d4d4",
-  black: "#000000",
-  red: "#cd3131",
-  green: "#0dbc79",
-  yellow: "#e5e510",
-  blue: "#2472c8",
-  magenta: "#bc3fbc",
-  cyan: "#11a8cd",
-  white: "#e5e5e5",
-  brightBlack: "#666666",
-  brightRed: "#f14c4c",
-  brightGreen: "#23d18b",
-  brightYellow: "#f5f543",
-  brightBlue: "#3b8eea",
-  brightMagenta: "#d670d6",
-  brightCyan: "#29b8db",
+  foreground: "#c5c8c6",
+  background: "#1d1f21",
+  cursor: "#c5c8c6",
+  cursorAccent: "#1d1f21",
+  selectionBackground: "#373b41",
+  black: "#1d1f21",
+  red: "#cc6666",
+  green: "#b5bd68",
+  yellow: "#f0c674",
+  blue: "#81a2be",
+  magenta: "#b294bb",
+  cyan: "#8abeb7",
+  white: "#c5c8c6",
+  brightBlack: "#969896",
+  brightRed: "#cc6666",
+  brightGreen: "#b5bd68",
+  brightYellow: "#f0c674",
+  brightBlue: "#81a2be",
+  brightMagenta: "#b294bb",
+  brightCyan: "#8abeb7",
   brightWhite: "#ffffff",
 };
 
