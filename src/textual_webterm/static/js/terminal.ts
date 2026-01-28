@@ -454,24 +454,19 @@ class WebTerminal {
 
     // Focus textarea on touch/click to show mobile keyboard
     // iOS requires focus() to be called synchronously within the gesture
-    this.element.addEventListener("touchend", (e) => {
-      // Only respond to single touch on terminal area
-      if (e.target === textarea || e.target === this.element || this.element.contains(e.target as Node)) {
-        this.mobileInput?.focus();
-      }
-    }, { passive: true });
-    
-    this.element.addEventListener("click", () => {
+    // Don't call terminal.focus() as it steals focus and dismisses keyboard
+    const focusTextarea = () => {
       this.mobileInput?.focus();
-      this.terminal.focus();
-    });
+    };
+
+    this.element.addEventListener("touchend", focusTextarea, { passive: true });
+    this.element.addEventListener("click", focusTextarea);
   }
 
   /** Focus the mobile input to show keyboard */
   private focusMobileInput(): void {
     // For programmatic focus (not from user gesture), this may not show keyboard on iOS
     this.mobileInput?.focus();
-    this.terminal.focus();
   }
 
   /** Wait for fonts to be loaded */
