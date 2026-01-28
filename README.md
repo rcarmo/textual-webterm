@@ -6,7 +6,7 @@ Serve terminal sessions and Textual apps over the web with a simple CLI command.
 
 This is heavily based on [textual-web](https://github.com/Textualize/textual-web), but specifically focused on serving a persistent terminal session in a way that you can host behind a reverse proxy (and some form of authentication).
 
-Built on [xterm.js](https://xtermjs.org/) 6.0, this package provides an easy way to expose terminal sessions and Textual applications via HTTP/WebSocket with automatic reconnection support.
+Built on [ghostty-web](https://github.com/coder/ghostty-web), this package provides an easy way to expose terminal sessions and Textual applications via HTTP/WebSocket with automatic reconnection support.
 
 Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to keep track of several containerized AI coding agents:
 
@@ -15,9 +15,12 @@ Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to
 ## Features
 
 - 🖥️ **Web-based terminal** - Access your terminal from any browser
+- 📱 **Mobile support** - Works on iOS Safari and Android with on-screen keyboard
 - 🐍 **Textual app support** - Serve Textual apps directly from Python modules
 - 🔄 **Session reconnection** - Refresh the page and reconnect to the same session
 - 🎨 **Full terminal emulation** - Colors, cursor, and ANSI codes work correctly
+- 🎭 **Customizable themes** - 9 built-in themes (monokai, dracula, nord, etc.)
+- 🔤 **Custom fonts** - Configure terminal font family and size
 - 📜 **Scrollback history** - Scroll back through terminal output (configurable)
 - 📐 **Auto-sizing** - Terminal automatically resizes to fit the browser window
 - 📸 **Live screenshots** - Dashboard shows real-time SVG screenshots of terminals
@@ -82,6 +85,15 @@ Specify host and port:
 textual-webterm --host 0.0.0.0 --port 8080 bash
 ```
 
+Customize theme and font:
+
+```bash
+textual-webterm --theme dracula --font-size 18
+textual-webterm --theme nord --font-family "JetBrains Mono, monospace"
+```
+
+Available themes: `monokai` (default), `dark`, `light`, `dracula`, `catppuccin`, `nord`, `gruvbox`, `solarized`, `tokyo`.
+
 Then open http://localhost:8080 in your browser.
 
 ## Session Dashboard
@@ -145,6 +157,11 @@ Options:
                                 (slug/name/command).
   -C, --compose-manifest PATH   Docker compose YAML; services with label
                                 "webterm-command" become landing tiles.
+  -t, --theme TEXT              Terminal color theme [default: monokai]
+                                Options: monokai, dark, light, dracula,
+                                catppuccin, nord, gruvbox, solarized, tokyo
+  -f, --font-family TEXT        Terminal font family (CSS font stack)
+  -s, --font-size INTEGER       Terminal font size in pixels [default: 16]
   --version                     Show the version and exit.
   --help                        Show this message and exit.
 ```
@@ -177,12 +194,13 @@ make install-dev
 - Lint: `make lint`
 - Format: `make format`
 - Tests: `make test`
-- Coverage (fail_under=79): `make coverage`
+- Coverage (fail_under=78): `make coverage`
 - Full check (lint + coverage): `make check`
+- Bump patch version: `make bump-patch`
 
 ### Frontend Development
 
-The terminal UI is built with [xterm.js](https://xtermjs.org/) 6.0. The pre-built bundle is committed to the repo, so users can `pip install` without needing Node.js.
+The terminal UI is built with [ghostty-web](https://github.com/coder/ghostty-web), which provides xterm.js API compatibility with Ghostty's VT100 parser via WebAssembly. The pre-built bundle is committed to the repo, so users can `pip install` without needing Node.js.
 
 To rebuild the frontend after modifying `terminal.ts`:
 
@@ -219,5 +237,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Related Projects
 
 - [Textual](https://github.com/Textualize/textual) - TUI framework for Python
-- [xterm.js](https://xtermjs.org/) - Terminal emulator for the web
+- [ghostty-web](https://github.com/coder/ghostty-web) - Ghostty terminal for the web with xterm.js API
 - [pyte](https://github.com/selectel/pyte) - PYTE terminal emulator
