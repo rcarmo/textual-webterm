@@ -6,7 +6,9 @@ Serve terminal sessions and Textual apps over the web with a simple CLI command.
 
 This is heavily based on [textual-web](https://github.com/Textualize/textual-web), but specifically focused on serving a persistent terminal session in a way that you can host behind a reverse proxy (and some form of authentication).
 
-Built on [ghostty-web](https://github.com/coder/ghostty-web), this package provides an easy way to expose terminal sessions and Textual applications via HTTP/WebSocket with automatic reconnection support.
+Built on a [patched version of ghostty-web](https://github.com/rcarmo/ghostty-web) (replacing the original xterm.js dependency), this package provides an easy way to expose terminal sessions via HTTP/WebSocket with automatic reconnection support.
+
+> **Note:** This project originally used [textual-web](https://github.com/Textualize/textual-web) with xterm.js. It has been rewritten to use [ghostty-web](https://github.com/coder/ghostty-web)'s WebAssembly-based terminal emulator, which provides better performance and native theme support. Textual app serving has been deprecated in favor of direct terminal access.
 
 Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to keep track of several containerized AI coding agents:
 
@@ -200,7 +202,15 @@ make install-dev
 
 ### Frontend Development
 
-The terminal UI is built with [ghostty-web](https://github.com/coder/ghostty-web), which provides xterm.js API compatibility with Ghostty's VT100 parser via WebAssembly. The pre-built bundle is committed to the repo, so users can `pip install` without needing Node.js.
+The terminal UI is built with a [patched version of ghostty-web](https://github.com/rcarmo/ghostty-web), which provides Ghostty's VT100 parser via WebAssembly with native theme/palette support. This replaces the original xterm.js dependency used in earlier versions.
+
+Key improvements over xterm.js:
+- Native theme colors passed directly to WASM (no runtime color remapping)
+- Smaller bundle size (~0.67 MB vs ~1.16 MB)
+- IME input support for CJK languages
+- Better Unicode and complex script rendering
+
+The pre-built bundle is committed to the repo, so users can `pip install` without needing Node.js.
 
 To rebuild the frontend after modifying `terminal.ts`:
 
@@ -236,6 +246,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Related Projects
 
-- [Textual](https://github.com/Textualize/textual) - TUI framework for Python
-- [ghostty-web](https://github.com/coder/ghostty-web) - Ghostty terminal for the web with xterm.js API
-- [pyte](https://github.com/selectel/pyte) - PYTE terminal emulator
+- [ghostty-web](https://github.com/rcarmo/ghostty-web) - Patched Ghostty terminal for the web (vendored fork with theme support)
+- [ghostty-web upstream](https://github.com/coder/ghostty-web) - Original Ghostty terminal for the web
+- [Textual](https://github.com/Textualize/textual) - TUI framework for Python (legacy support)
+- [pyte](https://github.com/selectel/pyte) - PYTE terminal emulator (used for SVG screenshots)
