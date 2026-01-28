@@ -16,6 +16,30 @@ const DEFAULT_FONT_FAMILY =
 
 /** Predefined terminal themes */
 const THEMES: Record<string, ITheme> = {
+  // Monokai Pro Ristretto - default theme
+  monokai: {
+    background: "#2d2a2e",
+    foreground: "#fcfcfa",
+    cursor: "#fcfcfa",
+    cursorAccent: "#2d2a2e",
+    selection: "#5b595c",
+    black: "#403e41",
+    red: "#ff6188",
+    green: "#a9dc76",
+    yellow: "#ffd866",
+    blue: "#fc9867",
+    magenta: "#ab9df2",
+    cyan: "#78dce8",
+    white: "#fcfcfa",
+    brightBlack: "#727072",
+    brightRed: "#ff6188",
+    brightGreen: "#a9dc76",
+    brightYellow: "#ffd866",
+    brightBlue: "#fc9867",
+    brightMagenta: "#ab9df2",
+    brightCyan: "#78dce8",
+    brightWhite: "#fcfcfa",
+  },
   // Dark themes
   dark: {
     background: "#1e1e1e",
@@ -297,7 +321,7 @@ class WebTerminal {
       scrollback: config.scrollback ?? 1000,
       cursorBlink: true,
       cursorStyle: "block",
-      theme: config.theme ?? THEMES.dark,
+      theme: config.theme ?? THEMES.monokai,
       wasmPath,
     };
 
