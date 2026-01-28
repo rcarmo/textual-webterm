@@ -464,6 +464,7 @@ class TestLocalServerMoreCoverage:
         assert "data-session-websocket-url" in resp.text
         assert "data-font-size" in resp.text
         assert "data-scrollback" in resp.text
+        assert 'data-theme="xterm"' in resp.text
         assert "<title>Known</title>" in resp.text
 
     @pytest.mark.asyncio

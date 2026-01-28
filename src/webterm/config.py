@@ -25,6 +25,7 @@ class App(BaseModel):
     color: str = ""
     command: ExpandVarsStr = ""
     terminal: bool = False
+    theme: str | None = None
 
 
 class Config(BaseModel):
@@ -136,6 +137,7 @@ def load_compose_manifest(manifest_path: Path) -> list[App]:
         command = _extract_label(labels, "webterm-command")
         if not command:
             continue
+        theme = _extract_label(labels, "webterm-theme")
         slug = slugify(name)
         apps.append(
             App(
@@ -145,6 +147,7 @@ def load_compose_manifest(manifest_path: Path) -> list[App]:
                 path=service.get("working_dir", "./"),
                 color="",
                 terminal=True,
+                theme=theme,
             )
         )
     return apps

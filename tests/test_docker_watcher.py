@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from webterm.docker_watcher import DEFAULT_COMMAND, LABEL_NAME, DockerWatcher
+from webterm.docker_watcher import LABEL_NAME, THEME_LABEL, DockerWatcher, _get_auto_command
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ class TestDockerWatcher:
     def test_get_container_command_auto(self, docker_watcher):
         """Test command generation when label is 'auto'."""
         container = {"Names": ["/my-container"], "Labels": {LABEL_NAME: "auto"}}
-        expected = f"docker exec -it my-container {DEFAULT_COMMAND}"
+        expected = f"docker exec -it my-container {_get_auto_command()}"
         assert docker_watcher._get_container_command(container) == expected
 
     def test_get_container_command_custom(self, docker_watcher):
@@ -67,13 +67,25 @@ class TestDockerWatcher:
         }
         assert docker_watcher._get_container_command(container) == "docker logs -f my-container"
 
+    def test_get_container_theme(self, docker_watcher):
+        container = {"Labels": {THEME_LABEL: "nord"}}
+        assert docker_watcher._get_container_theme(container) == "nord"
+
+    def test_get_container_theme_blank(self, docker_watcher):
+        container = {"Labels": {THEME_LABEL: "  "}}
+        assert docker_watcher._get_container_theme(container) is None
+
     @pytest.mark.asyncio
     async def test_add_container(self, session_manager):
         """Test adding a container."""
         on_added = MagicMock()
         watcher = DockerWatcher(session_manager, on_container_added=on_added)
 
-        container = {"Id": "abc123", "Names": ["/test-container"], "Labels": {LABEL_NAME: "auto"}}
+        container = {
+            "Id": "abc123",
+            "Names": ["/test-container"],
+            "Labels": {LABEL_NAME: "auto", THEME_LABEL: "monokai"},
+        }
 
         await watcher._add_container(container)
 
@@ -84,6 +96,7 @@ class TestDockerWatcher:
         assert "docker exec -it test-container" in call_args[0][1]  # command
         assert call_args[0][2] == "test-container"  # slug
         assert call_args[1]["terminal"] is True
+        assert call_args[1]["theme"] == "monokai"
 
         # Should call callback
         on_added.assert_called_once_with("test-container", "test-container", call_args[0][1])
@@ -222,13 +235,19 @@ class TestDockerWatcherIntegration:
     ("labels", "expected"),
     [
         ({"webterm-command": "echo hi"}, "echo hi"),
-        ({"webterm-command": "auto"}, f"docker exec -it my-container {DEFAULT_COMMAND}"),
-        ({"other": "value"}, f"docker exec -it my-container {DEFAULT_COMMAND}"),
+        ({"webterm-command": "auto"}, f"docker exec -it my-container {_get_auto_command()}"),
+        ({"other": "value"}, f"docker exec -it my-container {_get_auto_command()}"),
     ],
 )
 def test_get_container_command_variants(docker_watcher, labels, expected):
     container = {"Names": ["/my-container"], "Labels": labels}
     assert docker_watcher._get_container_command(container) == expected
+
+
+def test_auto_command_env_override(monkeypatch, docker_watcher):
+    monkeypatch.setenv("WEBTERM_DOCKER_AUTO_COMMAND", "/bin/sh")
+    container = {"Names": ["/my-container"], "Labels": {LABEL_NAME: "auto"}}
+    assert docker_watcher._get_container_command(container) == "docker exec -it my-container /bin/sh"
 
 
 @pytest.mark.asyncio
