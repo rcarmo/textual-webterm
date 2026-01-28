@@ -486,16 +486,37 @@ class WebTerminal {
    * uses canvas rendering without a visible scrollbar.
    */
   private fit(): void {
-    const renderer = (this.terminal as unknown as { renderer?: { getMetrics?: () => { width: number; height: number } } }).renderer;
-    if (!renderer?.getMetrics) {
-      // Fall back to FitAddon if we can't access renderer
-      this.fitAddon.fit();
-      return;
-    }
+    // Try to get metrics from renderer (private but accessible at runtime)
+    const termAny = this.terminal as unknown as Record<string, unknown>;
+    const renderer = termAny.renderer as { getMetrics?: () => { width: number; height: number } } | undefined;
     
-    const metrics = renderer.getMetrics();
-    if (!metrics || metrics.width === 0 || metrics.height === 0) {
-      return;
+    let cellWidth: number;
+    let cellHeight: number;
+    
+    if (renderer?.getMetrics) {
+      const metrics = renderer.getMetrics();
+      if (metrics && metrics.width > 0 && metrics.height > 0) {
+        cellWidth = metrics.width;
+        cellHeight = metrics.height;
+      } else {
+        // Fall back to measuring
+        const dims = this.measureCellSize();
+        if (!dims) {
+          this.fitAddon.fit();
+          return;
+        }
+        cellWidth = dims.width;
+        cellHeight = dims.height;
+      }
+    } else {
+      // Fall back to measuring
+      const dims = this.measureCellSize();
+      if (!dims) {
+        this.fitAddon.fit();
+        return;
+      }
+      cellWidth = dims.width;
+      cellHeight = dims.height;
     }
 
     const style = window.getComputedStyle(this.element);
@@ -511,12 +532,33 @@ class WebTerminal {
       return;
     }
 
-    const cols = Math.max(2, Math.floor(availableWidth / metrics.width));
-    const rows = Math.max(1, Math.floor(availableHeight / metrics.height));
+    const cols = Math.max(2, Math.floor(availableWidth / cellWidth));
+    const rows = Math.max(1, Math.floor(availableHeight / cellHeight));
 
     if (cols !== this.terminal.cols || rows !== this.terminal.rows) {
       this.terminal.resize(cols, rows);
     }
+  }
+
+  /** Measure cell size by creating a test character */
+  private measureCellSize(): { width: number; height: number } | null {
+    const testElement = document.createElement('span');
+    testElement.style.visibility = 'hidden';
+    testElement.style.position = 'absolute';
+    testElement.style.fontFamily = this.options.fontFamily || 'monospace';
+    testElement.style.fontSize = `${this.options.fontSize || 14}px`;
+    testElement.style.lineHeight = 'normal';
+    testElement.textContent = 'W';
+    
+    document.body.appendChild(testElement);
+    const width = testElement.offsetWidth;
+    const height = testElement.offsetHeight;
+    document.body.removeChild(testElement);
+    
+    if (width > 0 && height > 0) {
+      return { width, height };
+    }
+    return null;
   }
 
   /** Setup resize observer for container */
