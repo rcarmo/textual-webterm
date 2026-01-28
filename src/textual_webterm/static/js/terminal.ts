@@ -463,9 +463,41 @@ class WebTerminal {
 
   /** Initialize event handlers and connect */
   private initialize(): void {
+    console.log("[webterm:init] initialize() called");
+    
+    // Check canvas state immediately
+    const canvas = this.element.querySelector("canvas");
+    console.log("[webterm:init] Canvas element:", canvas);
+    if (canvas) {
+      console.log("[webterm:init] Canvas dimensions:", {
+        width: canvas.width,
+        height: canvas.height,
+        clientWidth: canvas.clientWidth,
+        clientHeight: canvas.clientHeight,
+        style: canvas.style.cssText
+      });
+    }
+    console.log("[webterm:init] Container dimensions:", {
+      clientWidth: this.element.clientWidth,
+      clientHeight: this.element.clientHeight
+    });
+    
     // Wait for fonts to load before fitting to ensure correct measurements
     this.waitForFonts().then(() => {
+      console.log("[webterm:init] Fonts loaded, calling fit()...");
       this.fit();
+      console.log("[webterm:init] fit() completed");
+      
+      // Check canvas state after fit
+      const canvasAfterFit = this.element.querySelector("canvas");
+      if (canvasAfterFit) {
+        console.log("[webterm:init] Canvas after fit:", {
+          width: canvasAfterFit.width,
+          height: canvasAfterFit.height,
+          clientWidth: canvasAfterFit.clientWidth,
+          clientHeight: canvasAfterFit.clientHeight
+        });
+      }
     });
     
     // Setup resize observer (we use our own fit method, not FitAddon's)
