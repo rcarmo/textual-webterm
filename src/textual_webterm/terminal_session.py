@@ -114,8 +114,9 @@ class TerminalSession(Session):
         if self.master_fd is None:
             return
         loop = asyncio.get_running_loop()
-        width, height = await loop.run_in_executor(None, self._get_terminal_size)
+        # Hold lock during PTY read to ensure consistency with concurrent set_terminal_size
         async with self._screen_lock:
+            width, height = await loop.run_in_executor(None, self._get_terminal_size)
             if self._screen.columns != width or self._screen.lines != height:
                 log.debug("Syncing pyte screen from %dx%d to %dx%d",
                          self._screen.columns, self._screen.lines, width, height)
@@ -125,12 +126,13 @@ class TerminalSession(Session):
 
     async def set_terminal_size(self, width: int, height: int) -> None:
         """Set terminal size."""
-        self._last_width = width
-        self._last_height = height
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._set_terminal_size, width, height)
-        # Resize pyte screen to match
+        # Hold lock during PTY write to ensure consistency with concurrent _sync_pyte_to_pty
         async with self._screen_lock:
+            self._last_width = width
+            self._last_height = height
+            await loop.run_in_executor(None, self._set_terminal_size, width, height)
+            # Resize pyte screen to match
             self._screen.resize(height, width)
 
     async def force_redraw(self) -> None:

@@ -851,7 +851,7 @@ class LocalServer:
     <style>
       html, body {{ width: 100%; height: 100%; }}
       body {{ background: #0c181f; margin: 0; padding: 0; overflow: hidden; }}
-      .textual-terminal {{ width: 100%; height: 100%; }}
+      .textual-terminal {{ width: 100%; height: 100%; display: block; overflow: hidden; }}
     </style>
 </head>
 <body>

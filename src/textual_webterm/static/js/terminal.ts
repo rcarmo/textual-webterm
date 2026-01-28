@@ -146,8 +146,8 @@ class WebTerminal {
   fit(): void {
     try {
       this.fitAddon.fit();
-    } catch {
-      // Ignore fit errors during initialization
+    } catch (e) {
+      console.warn("Fit failed:", e);
     }
   }
 
@@ -188,7 +188,8 @@ class WebTerminal {
           const dims = (() => {
             try {
               return this.fitAddon.proposeDimensions();
-            } catch {
+            } catch (e) {
+              console.warn("proposeDimensions failed:", e);
               return undefined;
             }
           })();
