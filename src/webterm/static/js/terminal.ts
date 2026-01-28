@@ -16,7 +16,31 @@ const DEFAULT_FONT_FAMILY =
 
 /** Predefined terminal themes */
 const THEMES: Record<string, ITheme> = {
-  // Classic xterm - default theme (VGA colors, pure black background)
+  // Tango - default theme (GNOME/xterm.js colors)
+  tango: {
+    background: "#000000",
+    foreground: "#d3d7cf",
+    cursor: "#d3d7cf",
+    cursorAccent: "#000000",
+    selectionBackground: "#555753",
+    black: "#2e3436",
+    red: "#cc0000",
+    green: "#4e9a06",
+    yellow: "#c4a000",
+    blue: "#3465a4",
+    magenta: "#75507b",
+    cyan: "#06989a",
+    white: "#d3d7cf",
+    brightBlack: "#555753",
+    brightRed: "#ef2929",
+    brightGreen: "#8ae234",
+    brightYellow: "#fce94f",
+    brightBlue: "#729fcf",
+    brightMagenta: "#ad7fa8",
+    brightCyan: "#34e2e2",
+    brightWhite: "#eeeeec",
+  },
+  // Classic xterm (VGA colors, pure black background)
   xterm: {
     background: "#000000",
     foreground: "#e5e5e5",
@@ -407,7 +431,7 @@ class WebTerminal {
     console.log("[webterm:create] Ghostty loaded:", ghostty);
     
     // Build terminal options
-    const themeToUse = config.theme ?? THEMES.xterm;
+    const themeToUse = config.theme ?? THEMES.tango;
     console.log("[webterm:create] Theme to use (config.theme ?? THEMES.xterm):", JSON.stringify(themeToUse, null, 2));
     const fontFamily = config.fontFamily?.trim() || DEFAULT_FONT_FAMILY;
     const fontSize = config.fontSize ?? 16;
