@@ -516,7 +516,21 @@ class WebTerminal {
     });
 
     // Handle special navigation keys via keydown (not covered by beforeinput)
+    // Check both physical keyboard modifiers (e.ctrlKey/e.shiftKey) and mobile keybar flags
     textarea.addEventListener("keydown", (e) => {
+      const isCtrl = e.ctrlKey || this.ctrlActive;
+      const isShift = e.shiftKey || this.shiftActive;
+
+      // Handle Ctrl+letter combinations (these don't fire input events)
+      if (e.ctrlKey && e.key.length === 1 && !e.altKey && !e.metaKey) {
+        const code = e.key.toUpperCase().charCodeAt(0);
+        if (code >= 65 && code <= 90) {
+          e.preventDefault();
+          this.send(["stdin", String.fromCharCode(code - 64)]); // Ctrl+A=0x01, Ctrl+C=0x03, etc.
+          return;
+        }
+      }
+
       let seq: string | null = null;
       let deactivate = false;
       switch (e.key) {
@@ -529,11 +543,11 @@ class WebTerminal {
         case "ArrowRight":
         case "ArrowLeft": {
           const dir = e.key === "ArrowUp" ? "A" : e.key === "ArrowDown" ? "B" : e.key === "ArrowRight" ? "C" : "D";
-          if (this.ctrlActive && this.shiftActive) {
+          if (isCtrl && isShift) {
             seq = `\x1b[1;6${dir}`;
-          } else if (this.ctrlActive) {
+          } else if (isCtrl) {
             seq = `\x1b[1;5${dir}`;
-          } else if (this.shiftActive) {
+          } else if (isShift) {
             seq = `\x1b[1;2${dir}`;
           } else {
             seq = `\x1b[${dir}`;
@@ -542,7 +556,7 @@ class WebTerminal {
           break;
         }
         case "Tab":
-          if (this.shiftActive) {
+          if (isShift) {
             seq = "\x1b[Z"; // Back-tab
           } else {
             seq = "\t";
@@ -1016,6 +1030,20 @@ class WebTerminal {
     }
     this.fitAddon.dispose();
     this.terminal.dispose();
+  }
+
+  /** Set terminal theme dynamically (accesses private renderer) */
+  setTheme(theme: ITheme): void {
+    // ghostty-web Terminal doesn't expose setTheme, but the internal renderer has it
+    const renderer = (this.terminal as unknown as { renderer?: { setTheme: (t: ITheme) => void } }).renderer;
+    if (renderer && typeof renderer.setTheme === "function") {
+      renderer.setTheme(theme);
+    }
+  }
+
+  /** Get a named theme from the built-in themes */
+  static getTheme(name: string): ITheme | undefined {
+    return THEMES[name.toLowerCase()];
   }
 }
 
