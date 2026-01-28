@@ -209,8 +209,13 @@ class WebTerminal {
       this.resizeState.resizeAttempts++;
       this.lastResizeTime = now;
       
-      this.fitAddon.fit();
-      this.resizeState.resizeAttempts = 0; // Reset on success
+      // Wrap FitAddon operation in additional safety check
+      if (this.fitAddon && typeof this.fitAddon.fit === 'function') {
+        this.fitAddon.fit();
+        this.resizeState.resizeAttempts = 0; // Reset on success
+      } else {
+        throw new Error("FitAddon not properly initialized");
+      }
       
     } catch (e) {
       console.warn("Fit failed:", e);
@@ -244,26 +249,57 @@ class WebTerminal {
   /** Check if terminal is ready for resize operations */
   private isTerminalReady(): boolean {
     try {
-      // Check if terminal and its core components are initialized
-      if (!this.terminal || !this.terminal._core) {
+      // Check if terminal exists
+      if (!this.terminal) {
         return false;
       }
+      
+      // Check if terminal core is initialized
+      if (!this.terminal._core) {
+        return false;
+      }
+      
+      const core = this.terminal._core;
       
       // Check if viewport is available (FitAddon requirement)
-      const core = this.terminal._core;
-      if (!core.viewport || !core.viewport.scrollBarWidth) {
+      if (!core.viewport) {
         return false;
       }
       
-      // Check if render service has valid dimensions
+      // Check if viewport has scrollBarWidth (this is what was failing)
+      if (core.viewport.scrollBarWidth === undefined) {
+        return false;
+      }
+      
+      // Check if render service exists
+      if (!core._renderService) {
+        return false;
+      }
+      
+      // Check if render service has dimensions
       const renderService = core._renderService;
-      if (!renderService || !renderService.dimensions) {
+      if (!renderService.dimensions) {
         return false;
       }
       
+      // Check if cell dimensions are valid
       const dims = renderService.dimensions;
       if (dims.css.cell.width === 0 || dims.css.cell.height === 0) {
         return false;
+      }
+      
+      // Additional safety check for FitAddon internal state
+      if (this.fitAddon) {
+        try {
+          // Try to access FitAddon's terminal reference
+          const fitTerminal = (this.fitAddon as any)._terminal;
+          if (!fitTerminal || fitTerminal !== this.terminal) {
+            return false;
+          }
+        } catch (e) {
+          // FitAddon might not have the expected structure
+          return false;
+        }
       }
       
       return true;

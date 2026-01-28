@@ -14551,8 +14551,12 @@ class WebTerminal {
       this.resizeState.isResizing = true;
       this.resizeState.resizeAttempts++;
       this.lastResizeTime = now;
-      this.fitAddon.fit();
-      this.resizeState.resizeAttempts = 0;
+      if (this.fitAddon && typeof this.fitAddon.fit === "function") {
+        this.fitAddon.fit();
+        this.resizeState.resizeAttempts = 0;
+      } else {
+        throw new Error("FitAddon not properly initialized");
+      }
     } catch (e) {
       console.warn("Fit failed:", e);
       this.handleResizeFailure();
@@ -14576,20 +14580,39 @@ class WebTerminal {
   }
   isTerminalReady() {
     try {
-      if (!this.terminal || !this.terminal._core) {
+      if (!this.terminal) {
+        return false;
+      }
+      if (!this.terminal._core) {
         return false;
       }
       const core = this.terminal._core;
-      if (!core.viewport || !core.viewport.scrollBarWidth) {
+      if (!core.viewport) {
+        return false;
+      }
+      if (core.viewport.scrollBarWidth === undefined) {
+        return false;
+      }
+      if (!core._renderService) {
         return false;
       }
       const renderService = core._renderService;
-      if (!renderService || !renderService.dimensions) {
+      if (!renderService.dimensions) {
         return false;
       }
       const dims = renderService.dimensions;
       if (dims.css.cell.width === 0 || dims.css.cell.height === 0) {
         return false;
+      }
+      if (this.fitAddon) {
+        try {
+          const fitTerminal = this.fitAddon._terminal;
+          if (!fitTerminal || fitTerminal !== this.terminal) {
+            return false;
+          }
+        } catch (e) {
+          return false;
+        }
       }
       return true;
     } catch (e) {
