@@ -27,6 +27,7 @@ def test_load_compose_manifest_reads_label():
       svc1:
         labels:
           webterm-command: echo svc1
+          webterm-theme: nord
       svc2:
         labels:
           - webterm-command=echo svc2
@@ -42,3 +43,5 @@ def test_load_compose_manifest_reads_label():
     commands = {a.command for a in apps}
     assert slugs == {"svc1", "svc2"}
     assert "echo svc1" in commands and "echo svc2" in commands
+    svc1 = next(app for app in apps if app.slug == "svc1")
+    assert svc1.theme == "nord"

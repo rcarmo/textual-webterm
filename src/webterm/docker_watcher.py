@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Callable
 
 from .docker_stats import get_docker_socket_path
@@ -20,7 +21,13 @@ if TYPE_CHECKING:
 log = logging.getLogger("webterm")
 
 LABEL_NAME = "webterm-command"
+THEME_LABEL = "webterm-theme"
+AUTO_COMMAND_ENV = "WEBTERM_DOCKER_AUTO_COMMAND"
 DEFAULT_COMMAND = "/bin/bash"
+
+
+def _get_auto_command() -> str:
+    return os.environ.get(AUTO_COMMAND_ENV, DEFAULT_COMMAND)
 
 
 class DockerWatcher:
@@ -120,8 +127,15 @@ class DockerWatcher:
 
         if label_value.lower() == "auto":
             container_name = self._get_container_name(container)
-            return f"docker exec -it {container_name} {DEFAULT_COMMAND}"
+            return f"docker exec -it {container_name} {_get_auto_command()}"
         return label_value
+
+    def _get_container_theme(self, container: dict) -> str | None:
+        labels = container.get("Labels", {})
+        value = labels.get(THEME_LABEL)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
 
     def _get_container_name(self, container: dict) -> str:
         """Get container name (without leading /)."""
@@ -139,6 +153,7 @@ class DockerWatcher:
         slug = self._container_to_slug(container)
         name = self._get_container_name(container)
         command = self._get_container_command(container)
+        theme = self._get_container_theme(container)
         container_id = container.get("Id", "")
 
         if slug in self._managed_containers:
@@ -147,7 +162,7 @@ class DockerWatcher:
 
         log.info("Adding container: %s (slug=%s, cmd=%s)", name, slug, command)
         self._managed_containers[slug] = container_id
-        self._session_manager.add_app(name, command, slug, terminal=True)
+        self._session_manager.add_app(name, command, slug, terminal=True, theme=theme)
 
         if self._on_container_added:
             self._on_container_added(slug, name, command)

@@ -101,8 +101,9 @@ webterm --docker-watch
 
 When a container starts with the label, it automatically appears in the dashboard. When it stops, it's removed. Label values:
 
-- `webterm-command: auto` - Runs `docker exec -it <container> /bin/bash`
+- `webterm-command: auto` - Runs `docker exec -it <container> /bin/bash` (override with `WEBTERM_DOCKER_AUTO_COMMAND`)
 - `webterm-command: <command>` - Runs the specified command
+- `webterm-theme: <theme>` - Sets the terminal theme for that container (xterm, monokai, dark, light, dracula, catppuccin, nord, gruvbox, solarized, tokyo)
 
 Example docker-compose.yaml:
 
@@ -112,18 +113,20 @@ services:
     image: myapp:latest
     labels:
       webterm-command: auto  # Opens bash in container
+      webterm-theme: monokai
   
   logs:
     image: myapp:latest  
     labels:
       webterm-command: docker logs -f myapp  # Shows logs
+      webterm-theme: nord
 ```
 
 **Requires**: Docker socket access (`-v /var/run/docker.sock:/var/run/docker.sock`)
 
 ### Docker Compose Integration
 
-Point to a docker-compose file; services with the label `webterm-command` become tiles:
+Point to a docker-compose file; services with the label `webterm-command` become tiles (and `webterm-theme` applies there too):
 
 ```yaml
 services:
@@ -131,6 +134,7 @@ services:
     image: postgres
     labels:
       webterm-command: docker exec -it db psql
+      webterm-theme: gruvbox
 ```
 
 Start with:

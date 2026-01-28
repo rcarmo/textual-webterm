@@ -35,7 +35,14 @@ class SessionManager:
         self.sessions: dict[SessionID, Session] = {}
         self.routes: TwoWayDict[RouteKey, SessionID] = TwoWayDict()
 
-    def add_app(self, name: str, command: str, slug: str, terminal: bool = False) -> None:
+    def add_app(
+        self,
+        name: str,
+        command: str,
+        slug: str,
+        terminal: bool = False,
+        theme: str | None = None,
+    ) -> None:
         """Add a new app
 
         Args:
@@ -44,7 +51,9 @@ class SessionManager:
             slug: Slug used in URL, or blank to auto-generate on server.
         """
         slug = slug or generate().lower()
-        new_app = config.App(name=name, slug=slug, path="./", command=command, terminal=terminal)
+        new_app = config.App(
+            name=name, slug=slug, path="./", command=command, terminal=terminal, theme=theme
+        )
         self.apps.append(new_app)
         self.apps_by_slug[slug] = new_app
 

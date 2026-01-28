@@ -188,16 +188,18 @@ class LocalServer:
     def app_count(self) -> int:
         return len(self.session_manager.apps)
 
-    def add_app(self, name: str, command: str, slug: str = "") -> None:
+    def add_app(self, name: str, command: str, slug: str = "", theme: str | None = None) -> None:
         slug = slug or generate().lower()
-        self.session_manager.add_app(name, command, slug=slug)
+        self.session_manager.add_app(name, command, slug=slug, theme=theme)
 
-    def add_terminal(self, name: str, command: str, slug: str = "") -> None:
+    def add_terminal(
+        self, name: str, command: str, slug: str = "", theme: str | None = None
+    ) -> None:
         if constants.WINDOWS:
             log.warning("Sorry, webterm does not currently support terminals on Windows")
             return
         slug = slug or generate().lower()
-        self.session_manager.add_app(name, command, slug=slug, terminal=True)
+        self.session_manager.add_app(name, command, slug=slug, terminal=True, theme=theme)
 
     async def run(self) -> None:
         try:
@@ -968,9 +970,10 @@ class LocalServer:
         page_title = available_app.name if available_app else "Webterm"
 
         # Build data attributes for terminal configuration
+        theme = available_app.theme or self.theme
         data_attrs = (
             f'data-session-websocket-url="{ws_url}" data-font-size="{self.font_size}" '
-            f'data-scrollback="1000" data-theme="{self.theme}"'
+            f'data-scrollback="1000" data-theme="{theme}"'
         )
         font_family = self.font_family or "var(--webterm-mono)"
         # Escape quotes for HTML attribute
@@ -978,7 +981,7 @@ class LocalServer:
         data_attrs += f' data-font-family="{escaped_font}"'
 
         # Get theme background color (fallback to black if unknown theme)
-        theme_bg = THEME_BACKGROUNDS.get(self.theme.lower(), "#000000")
+        theme_bg = THEME_BACKGROUNDS.get(theme.lower(), "#000000")
 
         html_content = f"""<!DOCTYPE html>
 <html>

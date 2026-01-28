@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy only what's needed for installation
 WORKDIR /build
 COPY pyproject.toml poetry.lock* ./
+COPY README.md ./
 COPY src/ ./src/
 # Install the package
 RUN pip install --no-cache-dir .
