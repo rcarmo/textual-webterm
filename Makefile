@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format test coverage check clean clean-all build build-all bundle bundle-watch bundle-clean
+.PHONY: help install install-dev lint format test coverage check clean clean-all build build-all bundle bundle-watch bundle-clean bump-patch
 
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
@@ -100,3 +100,17 @@ bundle-clean:
 	rm -rf node_modules bun.lock $(TERMINAL_JS) $(GHOSTTY_WASM)
 
 clean-all: clean bundle-clean
+
+# =============================================================================
+# Version management
+# =============================================================================
+
+# Bump patch version (e.g., 0.5.3 -> 0.5.4)
+bump-patch:
+	@OLD=$$(grep -Po '(?<=^version = ")[^"]+' pyproject.toml); \
+	MAJOR=$$(echo $$OLD | cut -d. -f1); \
+	MINOR=$$(echo $$OLD | cut -d. -f2); \
+	PATCH=$$(echo $$OLD | cut -d. -f3); \
+	NEW="$$MAJOR.$$MINOR.$$((PATCH + 1))"; \
+	sed -i "s/^version = \"$$OLD\"/version = \"$$NEW\"/" pyproject.toml; \
+	echo "Bumped version: $$OLD -> $$NEW"
