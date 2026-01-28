@@ -852,12 +852,6 @@ class LocalServer:
       html, body {{ width: 100%; height: 100%; }}
       body {{ background: #0c181f; margin: 0; padding: 0; overflow: hidden; }}
       .textual-terminal {{ width: 100%; height: 100%; }}
-      .textual-terminal .xterm,
-      .textual-terminal .xterm-viewport,
-      .textual-terminal .xterm-screen {{
-        width: 100%;
-        height: 100%;
-      }}
     </style>
 </head>
 <body>
