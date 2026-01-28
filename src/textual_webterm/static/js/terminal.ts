@@ -16,7 +16,31 @@ const DEFAULT_FONT_FAMILY =
 
 /** Predefined terminal themes */
 const THEMES: Record<string, ITheme> = {
-  // Monokai Pro Ristretto - default theme
+  // Classic xterm - default theme (VGA colors, pure black background)
+  xterm: {
+    background: "#000000",
+    foreground: "#e5e5e5",
+    cursor: "#e5e5e5",
+    cursorAccent: "#000000",
+    selection: "#4d4d4d",
+    black: "#000000",
+    red: "#cd0000",
+    green: "#00cd00",
+    yellow: "#cdcd00",
+    blue: "#0000cd",
+    magenta: "#cd00cd",
+    cyan: "#00cdcd",
+    white: "#e5e5e5",
+    brightBlack: "#4d4d4d",
+    brightRed: "#ff0000",
+    brightGreen: "#00ff00",
+    brightYellow: "#ffff00",
+    brightBlue: "#0000ff",
+    brightMagenta: "#ff00ff",
+    brightCyan: "#00ffff",
+    brightWhite: "#ffffff",
+  },
+  // Monokai Pro
   monokai: {
     background: "#2d2a2e",
     foreground: "#fcfcfa",
@@ -39,6 +63,30 @@ const THEMES: Record<string, ITheme> = {
     brightMagenta: "#ab9df2",
     brightCyan: "#78dce8",
     brightWhite: "#fcfcfa",
+  },
+  // Monokai Pro Ristretto (warmer variant)
+  ristretto: {
+    background: "#2d2525",
+    foreground: "#fff1f3",
+    cursor: "#fff1f3",
+    cursorAccent: "#2d2525",
+    selection: "#403838",
+    black: "#2c2525",
+    red: "#fd6883",
+    green: "#adda78",
+    yellow: "#f9cc6c",
+    blue: "#f38d70",
+    magenta: "#a8a9eb",
+    cyan: "#85dacc",
+    white: "#f9f8f5",
+    brightBlack: "#655761",
+    brightRed: "#fd6883",
+    brightGreen: "#adda78",
+    brightYellow: "#f9cc6c",
+    brightBlue: "#f38d70",
+    brightMagenta: "#a8a9eb",
+    brightCyan: "#85dacc",
+    brightWhite: "#f9f8f5",
   },
   // Dark themes
   dark: {
@@ -335,7 +383,7 @@ class WebTerminal {
       scrollback: config.scrollback ?? 1000,
       cursorBlink: true,
       cursorStyle: "block",
-      theme: config.theme ?? THEMES.monokai,
+      theme: config.theme ?? THEMES.xterm,
       wasmPath,
     };
 
