@@ -360,7 +360,13 @@ class WebTerminal {
               window.requestAnimationFrame(() => attemptFitAndResize(attempt + 1));
               return;
             }
-            // Fall through to use fallback dimensions
+            // Terminal not ready after max attempts - use fallback directly
+            // Don't call proposeDimensions() as it will throw
+            console.warn("Terminal not ready after max attempts, using fallback dimensions");
+            this.terminal.resize(fallback.cols, fallback.rows);
+            this.resizeState.lastValidSize = fallback;
+            this.send(["resize", { width: fallback.cols, height: fallback.rows }]);
+            return;
           }
           
           const dims = (() => {
