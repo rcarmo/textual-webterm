@@ -281,6 +281,16 @@ function getWasmPath(): string {
 /**
  * WebTerminal - wraps ghostty-web with WebSocket communication.
  */
+/** Detect if running on a mobile/touch device */
+function isMobileDevice(): boolean {
+  return (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent
+    ) ||
+    ("ontouchstart" in window && navigator.maxTouchPoints > 0)
+  );
+}
+
 class WebTerminal {
   private terminal: Terminal;
   private fitAddon: FitAddon;
@@ -293,6 +303,8 @@ class WebTerminal {
   private messageQueue: [string, unknown][] = [];
   private lastValidSize: { cols: number; rows: number } | null = null;
   private mobileInput: HTMLTextAreaElement | null = null;
+  private mobileKeybar: HTMLElement | null = null;
+  private ctrlActive = false;
 
   private constructor(
     container: HTMLElement,
@@ -369,6 +381,11 @@ class WebTerminal {
     // Setup mobile keyboard support
     this.setupMobileKeyboard();
 
+    // Setup mobile extended keybar (only on mobile devices)
+    if (isMobileDevice()) {
+      this.setupMobileKeybar();
+    }
+
     // Connect WebSocket
     this.connect();
   }
@@ -407,7 +424,27 @@ class WebTerminal {
     this.element.appendChild(textarea);
     this.mobileInput = textarea;
 
-    // Handle input from mobile keyboard
+    // Handle special keys via beforeinput to intercept before browser modifies textarea
+    textarea.addEventListener("beforeinput", (e) => {
+      let seq: string | null = null;
+      switch (e.inputType) {
+        case "insertLineBreak":  // Enter key
+          seq = "\r";
+          break;
+        case "deleteContentBackward":  // Backspace
+          seq = "\x7f";
+          break;
+        case "deleteContentForward":  // Delete
+          seq = "\x1b[3~";
+          break;
+      }
+      if (seq) {
+        e.preventDefault();
+        this.send(["stdin", seq]);
+      }
+    });
+
+    // Handle input from mobile keyboard (regular text only, special keys handled above)
     textarea.addEventListener("input", () => {
       const value = textarea.value;
       if (value) {
@@ -416,16 +453,10 @@ class WebTerminal {
       }
     });
 
-    // Handle special keys via keydown
+    // Handle special navigation keys via keydown (not covered by beforeinput)
     textarea.addEventListener("keydown", (e) => {
       let seq: string | null = null;
       switch (e.key) {
-        case "Enter":
-          seq = "\r";
-          break;
-        case "Backspace":
-          seq = "\x7f";
-          break;
         case "Escape":
           seq = "\x1b";
           break;
@@ -461,6 +492,169 @@ class WebTerminal {
 
     this.element.addEventListener("touchend", focusTextarea, { passive: true });
     this.element.addEventListener("click", focusTextarea);
+  }
+
+  /** Setup draggable mobile extended keyboard bar */
+  private setupMobileKeybar(): void {
+    const keybar = document.createElement("div");
+    keybar.className = "mobile-keybar";
+    keybar.innerHTML = `
+      <button class="keybar-drag" title="Drag to move">⋮⋮</button>
+      <button data-key="\\x1b" title="Escape">Esc</button>
+      <button data-modifier="ctrl" title="Ctrl modifier">Ctrl</button>
+      <button data-key="\\x09" title="Tab">Tab</button>
+      <button data-key="\\x1b[A" title="Up">↑</button>
+      <button data-key="\\x1b[B" title="Down">↓</button>
+      <button data-key="\\x1b[D" title="Left">←</button>
+      <button data-key="\\x1b[C" title="Right">→</button>
+    `;
+
+    // Inject styles
+    const style = document.createElement("style");
+    style.textContent = `
+      .mobile-keybar {
+        position: fixed;
+        bottom: 80px;
+        right: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px;
+        background: rgba(40, 40, 40, 0.95);
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        z-index: 10000;
+        touch-action: none;
+        max-width: 180px;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .mobile-keybar button {
+        min-width: 36px;
+        height: 32px;
+        padding: 0 8px;
+        border: 1px solid #555;
+        border-radius: 4px;
+        background: #333;
+        color: #eee;
+        font-size: 13px;
+        font-family: system-ui, sans-serif;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .mobile-keybar button:active {
+        background: #555;
+      }
+      .mobile-keybar button.active {
+        background: #0066cc;
+        border-color: #0088ff;
+      }
+      .mobile-keybar .keybar-drag {
+        min-width: 24px;
+        padding: 0 4px;
+        cursor: grab;
+        color: #888;
+      }
+      .mobile-keybar .keybar-drag:active {
+        cursor: grabbing;
+      }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(keybar);
+    this.mobileKeybar = keybar;
+
+    // Handle key button presses
+    keybar.querySelectorAll("button[data-key]").forEach((btn) => {
+      btn.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        let key = (btn as HTMLElement).dataset.key || "";
+        // Unescape the key sequences
+        key = key.replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) =>
+          String.fromCharCode(parseInt(hex, 16))
+        );
+        key = key.replace(/\\x1b/g, "\x1b");
+
+        // Apply Ctrl modifier if active
+        if (this.ctrlActive && key.length === 1) {
+          const code = key.toUpperCase().charCodeAt(0);
+          if (code >= 65 && code <= 90) {
+            key = String.fromCharCode(code - 64); // Ctrl+A = 0x01, etc.
+          }
+        }
+
+        this.send(["stdin", key]);
+        this.deactivateCtrl();
+      });
+    });
+
+    // Handle Ctrl modifier toggle
+    const ctrlBtn = keybar.querySelector('button[data-modifier="ctrl"]');
+    if (ctrlBtn) {
+      ctrlBtn.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        this.ctrlActive = !this.ctrlActive;
+        ctrlBtn.classList.toggle("active", this.ctrlActive);
+      });
+    }
+
+    // Setup drag functionality
+    this.setupKeybarDrag(keybar);
+  }
+
+  /** Make the keybar draggable */
+  private setupKeybarDrag(keybar: HTMLElement): void {
+    const dragHandle = keybar.querySelector(".keybar-drag") as HTMLElement;
+    if (!dragHandle) return;
+
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startRight = 0;
+    let startBottom = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      isDragging = true;
+      const touch = e.touches[0];
+      startX = touch.clientX;
+      startY = touch.clientY;
+
+      const rect = keybar.getBoundingClientRect();
+      startRight = window.innerWidth - rect.right;
+      startBottom = window.innerHeight - rect.bottom;
+
+      e.preventDefault();
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isDragging || e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const deltaX = startX - touch.clientX;
+      const deltaY = startY - touch.clientY;
+
+      const newRight = Math.max(0, Math.min(window.innerWidth - 100, startRight + deltaX));
+      const newBottom = Math.max(0, Math.min(window.innerHeight - 50, startBottom + deltaY));
+
+      keybar.style.right = `${newRight}px`;
+      keybar.style.bottom = `${newBottom}px`;
+
+      e.preventDefault();
+    };
+
+    const onTouchEnd = () => {
+      isDragging = false;
+    };
+
+    dragHandle.addEventListener("touchstart", onTouchStart, { passive: false });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd);
+  }
+
+  /** Deactivate Ctrl modifier */
+  private deactivateCtrl(): void {
+    this.ctrlActive = false;
+    const ctrlBtn = this.mobileKeybar?.querySelector('button[data-modifier="ctrl"]');
+    ctrlBtn?.classList.remove("active");
   }
 
   /** Focus the mobile input to show keyboard */
@@ -707,6 +901,10 @@ class WebTerminal {
     if (this.mobileInput) {
       this.mobileInput.remove();
       this.mobileInput = null;
+    }
+    if (this.mobileKeybar) {
+      this.mobileKeybar.remove();
+      this.mobileKeybar = null;
     }
     this.fitAddon.dispose();
     this.terminal.dispose();

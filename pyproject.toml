@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "textual-webterm"
-version = "0.5.6"
+version = "0.5.7"
 description = "Serve terminal sessions over the web"
 authors = ["Will McGugan <will@textualize.io>"]
 license = "MIT"
