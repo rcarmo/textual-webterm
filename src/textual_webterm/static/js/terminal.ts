@@ -275,6 +275,162 @@ const THEMES: Record<string, ITheme> = {
   },
 };
 
+/**
+ * ghostty-web's internal default palette (from ghostty-web.js const q).
+ * This is what the WASM terminal uses to resolve ANSI color codes to RGB.
+ * We need to know these to remap them to our custom theme.
+ */
+const GHOSTTY_DEFAULT_PALETTE: ITheme = {
+  foreground: "#d4d4d4",
+  background: "#1e1e1e",
+  cursor: "#ffffff",
+  cursorAccent: "#1e1e1e",
+  selectionBackground: "#264f78",
+  selectionForeground: "#d4d4d4",
+  black: "#000000",
+  red: "#cd3131",
+  green: "#0dbc79",
+  yellow: "#e5e510",
+  blue: "#2472c8",
+  magenta: "#bc3fbc",
+  cyan: "#11a8cd",
+  white: "#e5e5e5",
+  brightBlack: "#666666",
+  brightRed: "#f14c4c",
+  brightGreen: "#23d18b",
+  brightYellow: "#f5f543",
+  brightBlue: "#3b8eea",
+  brightMagenta: "#d670d6",
+  brightCyan: "#29b8db",
+  brightWhite: "#ffffff",
+};
+
+/** Convert hex color to RGB tuple */
+function hexToRgb(hex: string): [number, number, number] {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!result) return [0, 0, 0];
+  return [
+    parseInt(result[1], 16),
+    parseInt(result[2], 16),
+    parseInt(result[3], 16),
+  ];
+}
+
+/** Create a color map from default palette RGB to theme palette RGB */
+function buildColorMap(theme: ITheme): Map<string, [number, number, number]> {
+  const colorMap = new Map<string, [number, number, number]>();
+  
+  // Map each default color to the corresponding theme color
+  const colorKeys: (keyof ITheme)[] = [
+    'foreground', 'background',
+    'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+    'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
+    'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
+  ];
+  
+  for (const key of colorKeys) {
+    const defaultColor = GHOSTTY_DEFAULT_PALETTE[key];
+    const themeColor = theme[key];
+    if (defaultColor && themeColor) {
+      const defaultRgb = hexToRgb(defaultColor);
+      const themeRgb = hexToRgb(themeColor);
+      // Key is "r,g,b" string for fast lookup
+      const keyStr = `${defaultRgb[0]},${defaultRgb[1]},${defaultRgb[2]}`;
+      colorMap.set(keyStr, themeRgb);
+    }
+  }
+  
+  return colorMap;
+}
+
+/**
+ * Patch the renderer to remap colors from ghostty-web's default palette
+ * to our custom theme palette.
+ * 
+ * This is necessary because ghostty-web's WASM terminal has a hardcoded
+ * palette and returns pre-resolved RGB values. The theme we pass to the
+ * renderer is only used for background/cursor/selection, not for text colors.
+ */
+function patchRendererColors(terminal: Terminal, theme: ITheme): void {
+  const internalTerminal = terminal as unknown as Record<string, unknown>;
+  const renderer = internalTerminal.renderer as Record<string, unknown> | undefined;
+  
+  if (!renderer) {
+    console.warn("[webterm:patch] No renderer found, cannot patch colors");
+    return;
+  }
+  
+  const colorMap = buildColorMap(theme);
+  console.log("[webterm:patch] Built color map with", colorMap.size, "entries");
+  // Log a few mappings for debugging
+  for (const [key, value] of colorMap.entries()) {
+    console.log(`[webterm:patch] Color map: ${key} -> ${value.join(",")}`);
+  }
+  
+  // Store original renderCell method
+  const originalRenderCell = renderer.renderCell as (
+    cell: { fg_r: number; fg_g: number; fg_b: number; bg_r: number; bg_g: number; bg_b: number; [key: string]: unknown },
+    col: number,
+    row: number
+  ) => void;
+  
+  if (!originalRenderCell) {
+    console.warn("[webterm:patch] No renderCell method found");
+    return;
+  }
+  
+  let patchLogCount = 0;
+  const maxPatchLogs = 20;
+  const seenColors = new Set<string>();
+  
+  // Patch renderCell to remap colors
+  renderer.renderCell = function(
+    cell: { fg_r: number; fg_g: number; fg_b: number; bg_r: number; bg_g: number; bg_b: number; [key: string]: unknown },
+    col: number,
+    row: number
+  ) {
+    // Log unique colors we see from WASM (for debugging)
+    const fgKey = `${cell.fg_r},${cell.fg_g},${cell.fg_b}`;
+    const bgKey = `${cell.bg_r},${cell.bg_g},${cell.bg_b}`;
+    
+    if (patchLogCount < maxPatchLogs) {
+      if (!seenColors.has(`fg:${fgKey}`)) {
+        seenColors.add(`fg:${fgKey}`);
+        const inMap = colorMap.has(fgKey);
+        console.log(`[webterm:patch] WASM fg color: ${fgKey} (in map: ${inMap})`);
+        patchLogCount++;
+      }
+      if (!seenColors.has(`bg:${bgKey}`)) {
+        seenColors.add(`bg:${bgKey}`);
+        const inMap = colorMap.has(bgKey);
+        console.log(`[webterm:patch] WASM bg color: ${bgKey} (in map: ${inMap})`);
+        patchLogCount++;
+      }
+    }
+    
+    // Remap foreground color
+    const mappedFg = colorMap.get(fgKey);
+    if (mappedFg) {
+      cell.fg_r = mappedFg[0];
+      cell.fg_g = mappedFg[1];
+      cell.fg_b = mappedFg[2];
+    }
+    
+    // Remap background color
+    const mappedBg = colorMap.get(bgKey);
+    if (mappedBg) {
+      cell.bg_r = mappedBg[0];
+      cell.bg_g = mappedBg[1];
+      cell.bg_b = mappedBg[2];
+    }
+    
+    // Call original method with remapped colors
+    return originalRenderCell.call(this, cell, col, row);
+  };
+  
+  console.log("[webterm:patch] Successfully patched renderer.renderCell for theme colors");
+}
+
 /** Configuration options passed via data attributes or window config */
 interface TerminalConfig {
   fontFamily?: string;
@@ -431,6 +587,9 @@ class WebTerminal {
     console.log("[webterm:create] Calling terminal.open(container)...");
     await terminal.open(container);
     console.log("[webterm:create] terminal.open() completed");
+    
+    // Patch renderer to remap colors from ghostty-web's default palette to our theme
+    patchRendererColors(terminal, themeToUse);
     
     // Check internal state after open
     const internalTerminal = terminal as unknown as Record<string, unknown>;
