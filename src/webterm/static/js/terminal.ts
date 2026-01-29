@@ -608,6 +608,11 @@ class WebTerminal {
         this.terminal.focus();
       }
     });
+
+    // Restore focus when browser window regains focus
+    window.addEventListener("focus", () => {
+      this.terminal.focus();
+    });
   }
 
   /** Setup mobile keyboard input via hidden textarea */
