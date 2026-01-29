@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
+import asyncio
 import pytest
 from aiohttp import web
 
@@ -371,7 +372,6 @@ class TestLocalServerMoreCoverage:
         await server_with_no_apps.handle_session_data("rk", b"data")
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("handler", "payload"),
         [
@@ -382,9 +382,11 @@ class TestLocalServerMoreCoverage:
     async def test_handle_message_sends_bytes(self, server_with_no_apps, handler, payload):
         ws = MagicMock()
         ws.send_bytes = AsyncMock()
+        queue = asyncio.Queue(maxsize=10)
         server_with_no_apps._websocket_connections["rk"] = ws
+        server_with_no_apps._ws_send_queues["rk"] = queue
         await getattr(server_with_no_apps, handler)("rk", payload)
-        ws.send_bytes.assert_awaited_once_with(payload)
+        assert await queue.get() == payload
 
     @pytest.mark.asyncio
     async def test_handle_session_close_ends_session_and_closes_ws(
@@ -393,10 +395,13 @@ class TestLocalServerMoreCoverage:
         ws = MagicMock()
         ws.close = AsyncMock()
         server_with_no_apps._websocket_connections["rk"] = ws
+        server_with_no_apps._ws_send_queues["rk"] = asyncio.Queue(maxsize=10)
+        server_with_no_apps._ws_send_tasks["rk"] = asyncio.create_task(asyncio.sleep(10))
         monkeypatch.setattr(server_with_no_apps.session_manager, "on_session_end", MagicMock())
         await server_with_no_apps.handle_session_close("sid", "rk")
         server_with_no_apps.session_manager.on_session_end.assert_called_once_with("sid")
         ws.close.assert_awaited_once()
+        assert "rk" not in server_with_no_apps._ws_send_tasks
 
     def test_force_exit_sets_event(self, server_with_no_apps):
         assert not server_with_no_apps.exit_event.is_set()
@@ -710,11 +715,12 @@ class TestLocalServerMoreCoverage:
         ws = MagicMock()
         ws.send_bytes = AsyncMock()
         server_with_no_apps._websocket_connections["rk"] = ws
+        server_with_no_apps._ws_send_queues["rk"] = asyncio.Queue(maxsize=10)
         server_with_no_apps._route_last_activity["rk"] = 0.0
 
         await server_with_no_apps.handle_session_data("rk", b"data")
         assert server_with_no_apps._route_last_activity["rk"] > 0.0
-        ws.send_bytes.assert_awaited_once_with(b"data")
+        assert await server_with_no_apps._ws_send_queues["rk"].get() == b"data"
 
     def test_mark_route_activity_triggers_notification(self, server_with_no_apps):
         """Test that mark_route_activity triggers SSE notification."""

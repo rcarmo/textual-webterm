@@ -42,6 +42,8 @@ DEFAULT_TERMINAL_SIZE = (132, 45)
 
 SCREENSHOT_CACHE_SECONDS = 0.3
 SCREENSHOT_MAX_CACHE_SECONDS = 20.0
+WS_SEND_QUEUE_MAX = 256
+WS_SEND_TIMEOUT = 2.0
 
 
 WEBTERM_STATIC_PATH = Path(__file__).parent / "static"
@@ -182,6 +184,8 @@ class LocalServer:
         self._exit_poller = ExitPoller(self, idle_wait=exit_on_idle)
 
         self._websocket_connections: dict[RouteKey, web.WebSocketResponse] = {}
+        self._ws_send_queues: dict[RouteKey, asyncio.Queue[bytes | None]] = {}
+        self._ws_send_tasks: dict[RouteKey, asyncio.Task] = {}
         self._landing_apps = landing_apps or []
         self._compose_mode = compose_mode
         self._compose_project = compose_project
@@ -460,6 +464,9 @@ class LocalServer:
 
         log.info("WebSocket connection established for route %s", route_key)
         self._websocket_connections[route_key] = ws
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=WS_SEND_QUEUE_MAX)
+        self._ws_send_queues[route_key] = queue
+        self._ws_send_tasks[route_key] = asyncio.create_task(self._ws_sender(route_key, ws, queue))
 
         session_id = self.session_manager.routes.get(RouteKey(route_key))
         session = None
@@ -503,6 +510,7 @@ class LocalServer:
         finally:
             log.info("WebSocket connection closed for route %s", route_key)
             self._websocket_connections.pop(route_key, None)
+            await self._stop_ws_sender(route_key)
 
         return ws
 
@@ -1248,20 +1256,15 @@ class LocalServer:
 
     async def handle_session_data(self, route_key: RouteKey, data: bytes) -> None:
         self.mark_route_activity(str(route_key))
-        ws = self._websocket_connections.get(route_key)
-        if ws is None:
-            return
-        await ws.send_bytes(data)
+        self._enqueue_ws_data(route_key, data)
 
     async def handle_binary_message(self, route_key: RouteKey, payload: bytes) -> None:
         self.mark_route_activity(str(route_key))
-        ws = self._websocket_connections.get(route_key)
-        if ws is None:
-            return
-        await ws.send_bytes(payload)
+        self._enqueue_ws_data(route_key, payload)
 
     async def handle_session_close(self, session_id: SessionID, route_key: RouteKey) -> None:
         self.session_manager.on_session_end(session_id)
+        await self._stop_ws_sender(route_key)
         ws = self._websocket_connections.get(route_key)
         if ws is not None:
             with contextlib.suppress(Exception):
@@ -1269,3 +1272,57 @@ class LocalServer:
 
     def force_exit(self) -> None:
         self.exit_event.set()
+
+    def _enqueue_ws_data(self, route_key: RouteKey, data: bytes) -> None:
+        queue = self._ws_send_queues.get(route_key)
+        if queue is None:
+            return
+        try:
+            queue.put_nowait(data)
+        except asyncio.QueueFull:
+            # Drop oldest data to avoid blocking terminal sessions on slow clients.
+            with contextlib.suppress(asyncio.QueueEmpty):
+                queue.get_nowait()
+            try:
+                queue.put_nowait(data)
+            except asyncio.QueueFull:
+                log.warning("WebSocket send queue full for route %s; dropping output", route_key)
+
+    async def _ws_sender(
+        self,
+        route_key: RouteKey,
+        ws: web.WebSocketResponse,
+        queue: asyncio.Queue[bytes | None],
+    ) -> None:
+        try:
+            while True:
+                data = await queue.get()
+                if data is None:
+                    break
+                try:
+                    await asyncio.wait_for(ws.send_bytes(data), timeout=WS_SEND_TIMEOUT)
+                except asyncio.TimeoutError:
+                    log.warning("WebSocket send timeout for route %s; closing", route_key)
+                    break
+                except (
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                    aiohttp.ClientConnectionError,
+                ) as exc:
+                    log.warning("WebSocket send failed for route %s: %s", route_key, exc)
+                    break
+        finally:
+            if not ws.closed:
+                with contextlib.suppress(Exception):
+                    await ws.close()
+
+    async def _stop_ws_sender(self, route_key: RouteKey) -> None:
+        queue = self._ws_send_queues.pop(route_key, None)
+        if queue is not None:
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(None)
+        task = self._ws_send_tasks.pop(route_key, None)
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
