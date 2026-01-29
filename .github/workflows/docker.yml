@@ -258,3 +258,91 @@ jobs:
                 core.warning(`Failed to delete artifact ${artifact.id}: ${error.message}`);
               }
             }
+
+  prune-docker-images:
+    name: Prune old Docker images
+    runs-on: ubuntu-latest
+    needs: merge
+    permissions:
+      packages: write
+    steps:
+      - name: Delete untagged images
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const keepCount = 5;
+            const { owner, repo } = context.repo;
+            const packageName = repo.toLowerCase();
+            
+            core.info(`Cleaning Docker images for repository: ${owner}/${repo}`);
+            core.info(`Package name in registry: ${packageName}`);
+            
+            try {
+              // Get all package versions for THIS repository's container package only
+              const versions = await github.paginate(
+                github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg,
+                {
+                  package_type: 'container',
+                  package_name: packageName,  // This filters to only this repo's images
+                  org: owner,
+                  per_page: 100,
+                  state: 'active',
+                }
+              );
+              
+              core.info(`Found ${versions.length} package versions`);
+              
+              // Separate tagged and untagged versions
+              const taggedVersions = versions.filter(v => v.metadata?.container?.tags?.length > 0);
+              const untaggedVersions = versions.filter(v => !v.metadata?.container?.tags || v.metadata.container.tags.length === 0);
+              
+              core.info(`Tagged versions: ${taggedVersions.length}, Untagged versions: ${untaggedVersions.length}`);
+              
+              // Delete all untagged versions
+              for (const version of untaggedVersions) {
+                core.info(`Deleting untagged version ${version.id} (created: ${version.created_at})`);
+                try {
+                  await github.rest.packages.deletePackageVersionForOrg({
+                    package_type: 'container',
+                    package_name: packageName,
+                    org: owner,
+                    package_version_id: version.id,
+                  });
+                } catch (error) {
+                  core.warning(`Failed to delete untagged version ${version.id}: ${error.message}`);
+                }
+              }
+              
+              // Sort tagged versions by creation date (newest first)
+              const sortedTagged = taggedVersions.sort((a, b) => 
+                new Date(b.created_at) - new Date(a.created_at)
+              );
+              
+              // Keep the newest versions, delete the rest
+              const versionsToDelete = sortedTagged.slice(keepCount);
+              
+              core.info(`Keeping ${keepCount} newest tagged versions, deleting ${versionsToDelete.length} older ones...`);
+              for (const version of versionsToDelete) {
+                const tags = version.metadata?.container?.tags?.join(', ') || 'unknown';
+                core.info(`Deleting version ${version.id} with tags: ${tags} (created: ${version.created_at})`);
+                try {
+                  await github.rest.packages.deletePackageVersionForOrg({
+                    package_type: 'container',
+                    package_name: packageName,
+                    org: owner,
+                    package_version_id: version.id,
+                  });
+                } catch (error) {
+                  core.warning(`Failed to delete version ${version.id}: ${error.message}`);
+                }
+              }
+              
+            } catch (error) {
+              if (error.status === 404) {
+                core.info('No package found - this might be the first build');
+              } else {
+                core.setFailed(`Error managing package versions: ${error.message}`);
+              }
+            }
+

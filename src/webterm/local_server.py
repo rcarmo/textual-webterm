@@ -17,6 +17,7 @@ from aiohttp import WSMsgType, web
 
 from . import constants
 from .docker_stats import DockerStatsCollector, render_sparkline_svg
+from .docker_watcher import AUTO_COMMAND_SENTINEL
 from .exit_poller import ExitPoller
 from .identity import generate
 from .poller import Poller
@@ -34,7 +35,7 @@ DEFAULT_TERMINAL_SIZE = (132, 45)
 
 SCREENSHOT_CACHE_SECONDS = 0.3
 SCREENSHOT_MAX_CACHE_SECONDS = 20.0
-CLEAR_AND_REDRAW_SEQ = "\x0c"  # Ctrl+L: clear and redraw
+CLEAR_AND_REDRAW_SEQ = "\x1b[2J\x1b[H\x1b[3J"  # Clear screen and scrollback, move to home
 
 
 WEBTERM_STATIC_PATH = Path(__file__).parent / "static"
@@ -81,6 +82,13 @@ class LocalClientConnector(SessionConnector):
 
     async def on_close(self) -> None:
         await self.server.handle_session_close(self.session_id, self.route_key)
+
+
+def _format_command_label(command: str) -> str:
+    """Format command for display in UI, replacing sentinel with readable label."""
+    if command == AUTO_COMMAND_SENTINEL:
+        return "(tmux persistent session)"
+    return command
 
 
 class LocalServer:
@@ -312,15 +320,15 @@ class LocalServer:
             await runner.setup()
             stack.push_async_callback(runner.cleanup)
 
-            # Start Docker stats collector in compose mode
-            if self._compose_mode and self._landing_apps:
+            # Start Docker stats collector in compose mode or docker watch mode
+            if (self._compose_mode and self._landing_apps) or self._docker_watch_mode:
                 self._docker_stats = DockerStatsCollector(compose_project=self._compose_project)
                 if self._docker_stats.available:
                     # Pass service names (not slugs) for Docker matching
-                    service_names = [app.name for app in self._landing_apps]
+                    service_names = [app.name for app in (self._landing_apps if self._compose_mode else self.session_manager.apps)]
                     self._docker_stats.start(service_names)
                     # Create slug->name mapping for lookups
-                    self._slug_to_service = {app.slug: app.name for app in self._landing_apps}
+                    self._slug_to_service = {app.slug: app.name for app in (self._landing_apps if self._compose_mode else self.session_manager.apps)}
                     log.info("Slug to service mapping: %s", self._slug_to_service)
                     stack.push_async_callback(self._docker_stats.stop)
 
@@ -538,7 +546,7 @@ class LocalServer:
             if session_process is not None:
                 await asyncio.sleep(0.5)
 
-        if session_process is None or not hasattr(session_process, "get_screen_state"):
+        if session_process is None or not hasattr(session_process, "get_screen_snapshot"):
             raise web.HTTPNotFound(text="Session not found")
 
         # Get the actual screen state from the terminal session's pyte screen
@@ -707,7 +715,7 @@ class LocalServer:
             apps_for_dashboard = self._landing_apps
 
         tiles = [
-            {"slug": app.slug, "name": app.name, "command": app.command}
+            {"slug": app.slug, "name": app.name, "command": _format_command_label(app.command)}
             for app in apps_for_dashboard
         ]
         return web.json_response(tiles)
@@ -727,18 +735,19 @@ class LocalServer:
                 apps_for_dashboard = self._landing_apps
 
             tiles = [
-                {"slug": app.slug, "name": app.name, "command": app.command}
+                {"slug": app.slug, "name": app.name, "command": _format_command_label(app.command)}
                 for app in apps_for_dashboard
             ]
             tiles_json = json.dumps(tiles)
-            compose_mode_js = "true" if self._compose_mode else "false"
+            # Show CPU sparklines in both compose mode and docker watch mode
+            compose_mode_js = "true" if (self._compose_mode or self._docker_watch_mode) else "false"
             docker_watch_js = "true" if self._docker_watch_mode else "false"
             html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <title>Session Dashboard</title>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 16px; background: #0f172a; color: #e2e8f0; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 16px; background: #0f172a; color: #e2e8f0; }}
         h1 {{ margin-bottom: 8px; }}
         .subtitle {{ color: #64748b; font-size: 14px; margin-bottom: 16px; }}
         .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }}
@@ -1202,7 +1211,7 @@ class LocalServer:
     <link rel=\"stylesheet\" href=\"/static/monospace.css\">
     <style>
       html, body {{ width: 100%; height: 100%; }}
-      body {{ background: {theme_bg}; margin: 0; padding: 0; overflow: hidden; }}
+      body {{ background: {theme_bg}; margin: 0; padding: 0; overflow: hidden; font-family: var(--webterm-mono); }}
       .webterm-terminal {{ width: 100%; height: 100%; display: block; overflow: hidden; }}
     </style>
 </head>
