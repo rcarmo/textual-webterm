@@ -654,6 +654,8 @@ class WebTerminal {
       if (seq) {
         e.preventDefault();
         this.send(["stdin", seq]);
+        // Clear modifiers after sending special keys from soft keyboard
+        this.deactivateModifiers();
       }
     });
 
