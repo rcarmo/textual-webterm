@@ -340,7 +340,7 @@ class LocalClientConnector(SessionConnector):
 def _format_command_label(command: str) -> str:
     """Format command for display in UI, replacing sentinel with readable label."""
     if command == AUTO_COMMAND_SENTINEL:
-        return "(tmux persistent session)"
+        return ""
     return command
 
 
