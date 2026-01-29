@@ -35,7 +35,6 @@ DEFAULT_TERMINAL_SIZE = (132, 45)
 
 SCREENSHOT_CACHE_SECONDS = 0.3
 SCREENSHOT_MAX_CACHE_SECONDS = 20.0
-CLEAR_AND_REDRAW_SEQ = "\x1b[2J\x1b[H\x1b[3J"  # Clear screen and scrollback, move to home
 
 
 WEBTERM_STATIC_PATH = Path(__file__).parent / "static"
@@ -361,8 +360,10 @@ class LocalServer:
         """Callback when a Docker container is added."""
         log.info("Container added to dashboard: %s -> %s", name, slug)
         # Update slug-to-service mapping for sparklines
+        self._slug_to_service[slug] = name
+        # Register new service with stats collector so it starts polling
         if self._docker_stats:
-            self._slug_to_service[slug] = name
+            self._docker_stats.add_service(name)
             log.debug("Added sparkline mapping: %s -> %s", slug, name)
         # Notify SSE subscribers about dashboard change
         self._notify_activity("__dashboard__")
@@ -370,9 +371,10 @@ class LocalServer:
     def _on_docker_container_removed(self, slug: str) -> None:
         """Callback when a Docker container is removed."""
         log.info("Container removed from dashboard: %s", slug)
-        # Remove slug-to-service mapping
-        if self._docker_stats and slug in self._slug_to_service:
-            del self._slug_to_service[slug]
+        # Remove from stats collector and slug mapping
+        service_name = self._slug_to_service.pop(slug, None)
+        if self._docker_stats and service_name:
+            self._docker_stats.remove_service(service_name)
         # Invalidate any cached screenshots
         self._screenshot_cache.pop(slug, None)
         self._screenshot_cache_etag.pop(slug, None)
@@ -450,12 +452,6 @@ class LocalServer:
                 self.session_manager.on_session_end(session_id)
                 session_id = None
                 session = None
-            else:
-                # Force terminal redraw on reconnect to avoid blank screen
-                if hasattr(session, "force_redraw"):
-                    await session.force_redraw()
-                if hasattr(session, "send_bytes"):
-                    await session.send_bytes(CLEAR_AND_REDRAW_SEQ.encode("utf-8"))
 
         session_created = session_id is not None
 

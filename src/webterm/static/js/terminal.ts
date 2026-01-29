@@ -515,7 +515,12 @@ class WebTerminal {
     // Wait for fonts to load before fitting to ensure correct measurements
     this.waitForFonts().then(() => {
       console.log("[webterm:init] Fonts loaded, reapplying font family and fitting...");
-      // Use renderer's setFontFamily method to properly update fonts
+      // IMPORTANT: Font updates require BOTH steps to work correctly:
+      // 1. Set terminal.options.fontFamily - stores the font stack for future reference
+      // 2. Call renderer.setFontFamily() + remeasureFont() - applies the font and recalculates metrics
+      // Without step 1, the font stack is lost and defaults are used on re-render.
+      // Without step 2, the renderer doesn't know about the new fonts.
+      this.terminal.options.fontFamily = this.fontFamily;
       const renderer = (this.terminal as unknown as { renderer?: { setFontFamily: (family: string) => void; remeasureFont: () => void } }).renderer;
       if (renderer) {
         renderer.setFontFamily(this.fontFamily);

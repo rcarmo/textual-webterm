@@ -49,6 +49,9 @@ class DockerStatsCollector:
         self._task: asyncio.Task | None = None
         # Track previous CPU values for delta calculation
         self._prev_cpu: dict[str, tuple[int, int]] = {}
+        # Service names to poll (can be modified dynamically)
+        self._service_names: list[str] = []
+        self._service_names_lock = asyncio.Lock()
 
     @property
     def available(self) -> bool:
@@ -248,7 +251,7 @@ class DockerStatsCollector:
                 self._cpu_history[service_name] = deque(maxlen=STATS_HISTORY_SIZE)
             self._cpu_history[service_name].append(cpu_percent)
 
-    async def _poll_loop(self, service_names: list[str]) -> None:
+    async def _poll_loop(self) -> None:
         """Background polling loop."""
         # Discover container IDs on first run and periodically refresh
         service_to_container: dict[str, str] = {}
@@ -256,10 +259,14 @@ class DockerStatsCollector:
         warned_no_containers = False
 
         while self._running:
+            # Get current service names (may change dynamically)
+            service_names = list(self._service_names)
+
             # Refresh container mapping every 30 iterations (~5 minutes at 10s interval)
-            if refresh_counter % 30 == 0:
+            # or immediately if service list changed
+            if refresh_counter % 30 == 0 or set(service_to_container.keys()) != set(service_names):
                 service_to_container = await self._discover_containers(service_names)
-                if not service_to_container and not warned_no_containers:
+                if not service_to_container and service_names and not warned_no_containers:
                     log.warning(
                         "No Docker containers found for CPU stats. "
                         "Ensure Docker socket is mounted (-v /var/run/docker.sock:/var/run/docker.sock)"
@@ -290,9 +297,29 @@ class DockerStatsCollector:
         if self._running:
             return
 
+        self._service_names = list(service_names)
         self._running = True
-        self._task = asyncio.create_task(self._poll_loop(service_names))
+        self._task = asyncio.create_task(self._poll_loop())
         log.info("Started Docker stats collection for %d services", len(service_names))
+
+    def add_service(self, service_name: str) -> None:
+        """Add a service to the polling list dynamically.
+
+        This is safe to call while the collector is running - the poll loop
+        will pick up the new service on its next container discovery cycle.
+        """
+        if service_name not in self._service_names:
+            self._service_names.append(service_name)
+            log.debug("Added service to stats collector: %s", service_name)
+
+    def remove_service(self, service_name: str) -> None:
+        """Remove a service from the polling list."""
+        if service_name in self._service_names:
+            self._service_names.remove(service_name)
+            # Clean up history for removed service
+            self._cpu_history.pop(service_name, None)
+            self._prev_cpu.pop(service_name, None)
+            log.debug("Removed service from stats collector: %s", service_name)
 
     async def stop(self) -> None:
         """Stop collecting stats."""

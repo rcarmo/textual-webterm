@@ -168,6 +168,35 @@ class TestDockerStatsCollector:
 
         assert len(collector._cpu_history["test"]) == STATS_HISTORY_SIZE
 
+    def test_add_service_dynamic(self):
+        """Services can be added dynamically after start."""
+        collector = DockerStatsCollector("/nonexistent")
+        collector._service_names = ["svc1"]
+        
+        collector.add_service("svc2")
+        assert "svc2" in collector._service_names
+        
+        # Adding same service again is a no-op
+        collector.add_service("svc2")
+        assert collector._service_names.count("svc2") == 1
+
+    def test_remove_service_dynamic(self):
+        """Services can be removed dynamically."""
+        from collections import deque
+        
+        collector = DockerStatsCollector("/nonexistent")
+        collector._service_names = ["svc1", "svc2"]
+        collector._cpu_history["svc1"] = deque([10.0, 20.0])
+        collector._prev_cpu["svc1"] = (100, 200)
+        
+        collector.remove_service("svc1")
+        assert "svc1" not in collector._service_names
+        assert "svc1" not in collector._cpu_history
+        assert "svc1" not in collector._prev_cpu
+        
+        # Removing non-existent service is safe
+        collector.remove_service("nonexistent")  # Should not raise
+
 
 class TestLocalServerSparklineEndpoint:
     """Tests for the CPU sparkline endpoint in LocalServer."""
