@@ -257,6 +257,8 @@ class TestLocalServerHelpers:
         response = await server._handle_root(request)
         assert "/?route_key=${encodeURIComponent(tile.slug)}" in response.text
         assert "visibilitychange" in response.text
+        assert "searchQuery = ''" in response.text
+        assert "activeResultIndex = -1" in response.text
 
     @pytest.fixture
     def config(self):

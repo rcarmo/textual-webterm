@@ -904,6 +904,10 @@ class LocalServer:
         function openTile(tile) {{
             if (!tile || !tile.slug) return;
             window.open(`/?route_key=${{encodeURIComponent(tile.slug)}}`, `webterm-${{tile.slug}}`);
+            // Dismiss typeahead after launching from floating results.
+            searchQuery = '';
+            activeResultIndex = -1;
+            renderFloatingResults();
         }}
 
         function normalizeText(value) {{
