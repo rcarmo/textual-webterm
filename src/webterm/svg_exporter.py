@@ -82,10 +82,27 @@ class CharData(TypedDict):
     reverse: bool
 
 
-def _color_to_hex(color: str, is_foreground: bool = True) -> str:
+def _normalize_palette(palette: dict[str, str]) -> dict[str, str]:
+    normalized = {key.lower(): value for key, value in palette.items()}
+    normalized.setdefault("gray", normalized.get("brightblack", ANSI_COLORS["gray"]))
+    normalized.setdefault("grey", normalized.get("brightblack", ANSI_COLORS["grey"]))
+    normalized.setdefault("lightgray", normalized.get("white", ANSI_COLORS["lightgray"]))
+    normalized.setdefault("lightgrey", normalized.get("white", ANSI_COLORS["lightgrey"]))
+    normalized.setdefault("brown", normalized.get("yellow", ANSI_COLORS["brown"]))
+    return normalized
+
+
+def _color_to_hex(
+    color: str,
+    is_foreground: bool = True,
+    *,
+    palette: dict[str, str] | None = None,
+    default_fg: str = DEFAULT_FG,
+    default_bg: str = DEFAULT_BG,
+) -> str:
     """Convert pyte color to hex value."""
     if color == "default":
-        return DEFAULT_FG if is_foreground else DEFAULT_BG
+        return default_fg if is_foreground else default_bg
 
     # Already a hex color with #
     if color.startswith("#"):
@@ -98,15 +115,16 @@ def _color_to_hex(color: str, is_foreground: bool = True) -> str:
 
     # Named color lookup (case-insensitive)
     lower = color.lower()
-    if lower in ANSI_COLORS:
-        return ANSI_COLORS[lower]
+    palette_map = palette if palette is not None else ANSI_COLORS
+    if lower in palette_map:
+        return palette_map[lower]
 
     # RGB format "rgb(r,g,b)" - rarely used but handle it
     if lower.startswith("rgb("):
         # Not common in terminal output, return default
-        return DEFAULT_FG if is_foreground else DEFAULT_BG
+        return default_fg if is_foreground else default_bg
 
-    return DEFAULT_FG if is_foreground else DEFAULT_BG
+    return default_fg if is_foreground else default_bg
 
 
 def _escape_xml(text: str) -> str:
@@ -125,6 +143,7 @@ def render_terminal_svg(
     line_height: float = LINE_HEIGHT,
     background: str = DEFAULT_BG,
     foreground: str = DEFAULT_FG,
+    palette: dict[str, str] | None = None,
 ) -> str:
     """Render terminal screen buffer to SVG.
 
@@ -186,6 +205,8 @@ def render_terminal_svg(
 
     # Render each row - use explicit x position for EACH character
     # to ensure pixel-perfect alignment regardless of font metrics
+    palette_map = _normalize_palette(palette) if palette is not None else ANSI_COLORS
+
     for row_idx, row_data in enumerate(screen_buffer):
         # rect_y is the top of the cell
         rect_y = 10 + row_idx * actual_line_height
@@ -214,8 +235,20 @@ def render_terminal_svg(
             x = 10.0 + col * char_width
 
             # Get colors, handling reverse video
-            fg = _color_to_hex(char["fg"], is_foreground=True)
-            bg = _color_to_hex(char["bg"], is_foreground=False)
+            fg = _color_to_hex(
+                char["fg"],
+                is_foreground=True,
+                palette=palette_map,
+                default_fg=foreground,
+                default_bg=background,
+            )
+            bg = _color_to_hex(
+                char["bg"],
+                is_foreground=False,
+                palette=palette_map,
+                default_fg=foreground,
+                default_bg=background,
+            )
             if char["reverse"]:
                 fg, bg = bg, fg
 

@@ -183,6 +183,14 @@ class TestLocalServerHelpers:
 
         screen_buffer = screen_buffer_factory(["hello", ""])
         mock_session.get_screen_snapshot = AsyncMock(return_value=(80, 2, screen_buffer, True))
+        server.session_manager.apps_by_slug["rk"] = App(
+            name="Test",
+            slug="rk",
+            path="./",
+            command="echo test",
+            terminal=True,
+            theme="dracula",
+        )
 
         monkeypatch.setattr(
             server.session_manager, "get_session_by_route_key", lambda _rk: mock_session
@@ -191,6 +199,7 @@ class TestLocalServerHelpers:
         response = await server._handle_screenshot(request)
         assert response.content_type == "image/svg+xml"
         assert "<svg" in response.text
+        assert "#282a36" in response.text
 
         out = capsys.readouterr()
         assert out.out == ""
