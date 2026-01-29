@@ -601,6 +601,13 @@ class WebTerminal {
 
     // Connect WebSocket
     this.connect();
+
+    // Focus terminal when returning to the tab
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        this.terminal.focus();
+      }
+    });
   }
 
   /** Setup mobile keyboard input via hidden textarea */
