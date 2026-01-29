@@ -101,7 +101,7 @@ webterm --docker-watch
 
 When a container starts with the label, it automatically appears in the dashboard. When it stops, it's removed. Label values:
 
-- `webterm-command: auto` - Runs `docker exec -it <container> /bin/bash` (override with `WEBTERM_DOCKER_AUTO_COMMAND`)
+- `webterm-command: auto` (or empty) - Opens a PTY via Docker exec API (override with `WEBTERM_DOCKER_AUTO_COMMAND`)
 - `webterm-command: <command>` - Runs the specified command
 - `webterm-theme: <theme>` - Sets the terminal theme for that container (xterm, monokai, dark, light, dracula, catppuccin, nord, gruvbox, solarized, tokyo)
 

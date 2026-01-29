@@ -21,6 +21,8 @@ build-all: clean-all node_modules build install-dev check ## Full reproducible b
 # =============================================================================
 # Python targets
 # =============================================================================
+# NOTE: Install dev tools (ruff/pytest/etc.) using `pip install --user --break-system-packages`
+# from the dev dependency list (pyproject.toml or requirements-dev.txt).
 
 install: ## Install package in editable mode
 	$(PIP) install -e .

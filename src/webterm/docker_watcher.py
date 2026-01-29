@@ -24,10 +24,18 @@ LABEL_NAME = "webterm-command"
 THEME_LABEL = "webterm-theme"
 AUTO_COMMAND_ENV = "WEBTERM_DOCKER_AUTO_COMMAND"
 DEFAULT_COMMAND = "/bin/bash"
+AUTO_COMMAND_SENTINEL = "__docker_exec__"
 
 
 def _get_auto_command() -> str:
     return os.environ.get(AUTO_COMMAND_ENV, DEFAULT_COMMAND)
+
+
+def _is_auto_label(value: str | None) -> bool:
+    if value is None:
+        return True
+    stripped = value.strip()
+    return stripped == "" or stripped.lower() == "auto"
 
 
 class DockerWatcher:
@@ -123,11 +131,10 @@ class DockerWatcher:
         If label is 'auto', returns default exec command.
         """
         labels = container.get("Labels", {})
-        label_value = labels.get(LABEL_NAME, "auto")
+        label_value = labels.get(LABEL_NAME)
 
-        if label_value.lower() == "auto":
-            container_name = self._get_container_name(container)
-            return f"docker exec -it {container_name} {_get_auto_command()}"
+        if _is_auto_label(label_value):
+            return AUTO_COMMAND_SENTINEL
         return label_value
 
     def _get_container_theme(self, container: dict) -> str | None:

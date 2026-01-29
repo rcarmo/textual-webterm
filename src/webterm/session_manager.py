@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import sys
 from typing import TYPE_CHECKING
 
 from . import config, constants
 from ._two_way_dict import TwoWayDict
+from .docker_exec_session import DockerExecSession, DockerExecSpec
+from .docker_watcher import AUTO_COMMAND_SENTINEL, _get_auto_command
 from .identity import generate
 
 if TYPE_CHECKING:
@@ -133,12 +136,18 @@ class SessionManager:
         if constants.WINDOWS:
             log.warning("Sorry, webterm does not currently support terminals on Windows")
             return None
-
-        session_process = TerminalSession(
-            self.poller,
-            session_id,
-            app.command,
-        )
+        if app.command == AUTO_COMMAND_SENTINEL:
+            exec_spec = DockerExecSpec(
+                container=app.name,
+                command=shlex.split(_get_auto_command()),
+            )
+            session_process = DockerExecSession(self.poller, session_id, exec_spec)
+        else:
+            session_process = TerminalSession(
+                self.poller,
+                session_id,
+                app.command,
+            )
         log.info("Created terminal session %s", session_id)
 
         # Open the session BEFORE registering it, so it's fully initialized

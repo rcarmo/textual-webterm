@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from webterm.config import App
+from webterm.docker_watcher import AUTO_COMMAND_SENTINEL
 from webterm.session_manager import SessionManager
 from webterm.types import RouteKey, SessionID
 
@@ -189,6 +190,30 @@ class TestSessionManager:
             assert isinstance(result, TerminalSession)
             assert SessionID("test-session") in manager.sessions
             assert RouteKey("test-route") in manager.routes
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(platform.system() == "Windows", reason="Terminal not supported on Windows")
+    async def test_new_docker_exec_session(self, mock_poller, mock_path):
+        from webterm.docker_exec_session import DockerExecSession
+
+        app = App(
+            name="my-container",
+            slug="my-container",
+            path="./",
+            command=AUTO_COMMAND_SENTINEL,
+            terminal=True,
+        )
+        manager = SessionManager(mock_poller, mock_path, [app])
+
+        with patch.object(DockerExecSession, "open", new_callable=AsyncMock):
+            result = await manager.new_session(
+                "my-container",
+                SessionID("test-session"),
+                RouteKey("test-route"),
+            )
+
+            assert result is not None
+            assert isinstance(result, DockerExecSession)
 
 class TestSessionManagerRoutes:
     """Tests for SessionManager route handling."""
