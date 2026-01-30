@@ -710,14 +710,17 @@ class WebTerminal {
       if (value) {
         let toSend = value;
         // Apply Shift modifier (uppercase letters)
-        if (this.shiftActive && value.length === 1) {
+        if (this.shiftActive) {
           toSend = value.toUpperCase();
         }
         // Apply Ctrl modifier if active (convert letters to control codes)
-        if (this.ctrlActive && value.length === 1) {
-          const code = toSend.toUpperCase().charCodeAt(0);
+        if (this.ctrlActive) {
+          const firstChar = toSend[0] ?? "";
+          const code = firstChar.toUpperCase().charCodeAt(0);
           if (code >= 65 && code <= 90) {
             toSend = String.fromCharCode(code - 64); // Ctrl+A = 0x01, Ctrl+D = 0x04, etc.
+          } else {
+            toSend = firstChar;
           }
         }
         this.send(["stdin", toSend]);
@@ -1006,6 +1009,7 @@ class WebTerminal {
           this.shiftActive = !this.shiftActive;
           btn.classList.toggle("active", this.shiftActive);
         }
+        this.focusMobileInput();
       });
     });
 
