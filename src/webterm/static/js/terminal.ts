@@ -409,6 +409,8 @@ class WebTerminal {
   private mobileKeybar: HTMLElement | null = null;
   private ctrlActive = false;
   private shiftActive = false;
+  private pendingCtrl = false;
+  private pendingShift = false;
   private fontFamily: string;
   private fontSize: number;
 
@@ -664,24 +666,30 @@ class WebTerminal {
 
     // Handle special keys via beforeinput to intercept before browser modifies textarea
     textarea.addEventListener("beforeinput", (e) => {
-      if (e.inputType === "insertText" && e.data && (this.ctrlActive || this.shiftActive)) {
-        let toSend = e.data;
-        if (this.shiftActive && toSend.length === 1) {
-          toSend = toSend.toUpperCase();
-        }
-        if (this.ctrlActive && toSend.length === 1) {
-          const code = toSend.toUpperCase().charCodeAt(0);
-          if (code >= 65 && code <= 90) {
-            toSend = String.fromCharCode(code - 64);
+        if (
+          e.inputType === "insertText"
+          && e.data
+          && (this.ctrlActive || this.shiftActive || this.pendingCtrl || this.pendingShift)
+        ) {
+          let toSend = e.data;
+          if ((this.shiftActive || this.pendingShift) && toSend.length === 1) {
+            toSend = toSend.toUpperCase();
           }
+          if ((this.ctrlActive || this.pendingCtrl) && toSend.length === 1) {
+            const code = toSend.toUpperCase().charCodeAt(0);
+            if (code >= 65 && code <= 90) {
+              toSend = String.fromCharCode(code - 64);
+            }
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          this.send(["stdin", toSend]);
+          textarea.value = "";
+          this.deactivateModifiers();
+          this.pendingCtrl = false;
+          this.pendingShift = false;
+          return;
         }
-        e.preventDefault();
-        e.stopPropagation();
-        this.send(["stdin", toSend]);
-        textarea.value = "";
-        this.deactivateModifiers();
-        return;
-      }
 
       let seq: string | null = null;
       switch (e.inputType) {
@@ -710,11 +718,11 @@ class WebTerminal {
       if (value) {
         let toSend = value;
         // Apply Shift modifier (uppercase letters)
-        if (this.shiftActive) {
+        if (this.shiftActive || this.pendingShift) {
           toSend = value.toUpperCase();
         }
         // Apply Ctrl modifier if active (convert letters to control codes)
-        if (this.ctrlActive) {
+        if (this.ctrlActive || this.pendingCtrl) {
           const firstChar = toSend[0] ?? "";
           const code = firstChar.toUpperCase().charCodeAt(0);
           if (code >= 65 && code <= 90) {
@@ -726,6 +734,8 @@ class WebTerminal {
         this.send(["stdin", toSend]);
         textarea.value = "";
         this.deactivateModifiers();
+        this.pendingCtrl = false;
+        this.pendingShift = false;
       }
     });
 
@@ -1004,9 +1014,11 @@ class WebTerminal {
         const modifier = (btn as HTMLElement).dataset.modifier;
         if (modifier === "ctrl") {
           this.ctrlActive = !this.ctrlActive;
+          this.pendingCtrl = this.ctrlActive;
           btn.classList.toggle("active", this.ctrlActive);
         } else if (modifier === "shift") {
           this.shiftActive = !this.shiftActive;
+          this.pendingShift = this.shiftActive;
           btn.classList.toggle("active", this.shiftActive);
         }
         this.focusMobileInput();
@@ -1070,6 +1082,8 @@ class WebTerminal {
   private deactivateModifiers(): void {
     this.ctrlActive = false;
     this.shiftActive = false;
+    this.pendingCtrl = false;
+    this.pendingShift = false;
     this.mobileKeybar?.querySelectorAll("button[data-modifier]").forEach((btn) => {
       btn.classList.remove("active");
     });

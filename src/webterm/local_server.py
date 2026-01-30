@@ -1036,6 +1036,10 @@ class LocalServer:
 <html>
 <head>
     <title>Session Dashboard</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <link rel="icon" href="/static/icons/webterm-192.png" sizes="192x192">
+    <link rel="apple-touch-icon" href="/static/icons/webterm-192.png">
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 16px; background: #0f172a; color: #e2e8f0; }}
         h1 {{ margin-bottom: 8px; }}
@@ -1174,7 +1178,6 @@ class LocalServer:
                 if (typeof win.focus === 'function') {{
                     win.focus();
                 }}
-                win.location.href = url;
             }} else {{
                 window.location.href = url;
             }}

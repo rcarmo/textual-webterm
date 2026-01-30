@@ -1,0 +1,21 @@
+{
+  "name": "Webterm Dashboard",
+  "short_name": "webterm",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    {
+      "src": "/static/icons/webterm-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/webterm-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
