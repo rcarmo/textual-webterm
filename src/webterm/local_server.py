@@ -1162,9 +1162,19 @@ class LocalServer:
             if (!tile || !tile.slug) return;
             const url = `/?route_key=${{encodeURIComponent(tile.slug)}}`;
             const target = `webterm-${{tile.slug}}`;
-            const win = window.open(url, target);
-            if (win && typeof win.focus === 'function') {{
-                win.focus();
+            let win = window.open(url, target);
+            if (!win) {{
+                window.location.href = url;
+                return;
+            }}
+            if (win.closed) {{
+                win = window.open(url, target);
+            }}
+            if (win) {{
+                if (typeof win.focus === 'function') {{
+                    win.focus();
+                }}
+                win.location.href = url;
             }} else {{
                 window.location.href = url;
             }}
