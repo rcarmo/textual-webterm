@@ -109,12 +109,18 @@ Containers that only specify `webterm-theme` are still included and use the defa
 
 **Environment Variables:**
 - `WEBTERM_DOCKER_USERNAME` - Set to run Docker exec sessions as a specific user (default: root)
-- `WEBTERM_DOCKER_AUTO_COMMAND` - Override the default `auto` command (default: `tmux new-session -As webterm`)
+- `WEBTERM_DOCKER_AUTO_COMMAND` - Override the default `auto` command (default: `/bin/bash`). Supports `{container}` placeholder for the container name.
 
 Example: Start containers and exec into them as `developer` user:
 ```bash
 WEBTERM_DOCKER_USERNAME=developer webterm --docker-watch
 ```
+
+Example: Use tmux with per-container session names:
+```bash
+WEBTERM_DOCKER_AUTO_COMMAND="tmux new-session -ADs {container}" webterm --docker-watch
+```
+This creates a tmux session named after each container (e.g., `my-webapp`, `redis`, etc.) instead of a shared session name.
 
 Example docker-compose.yaml:
 
