@@ -110,6 +110,7 @@ Containers that only specify `webterm-theme` are still included and use the defa
 **Environment Variables:**
 - `WEBTERM_DOCKER_USERNAME` - Set to run Docker exec sessions as a specific user (default: root)
 - `WEBTERM_DOCKER_AUTO_COMMAND` - Override the default `auto` command (default: `/bin/bash`). Supports `{container}` placeholder for the container name.
+- `WEBTERM_SCREENSHOT_FORCE_REDRAW` - When set to `true`, send a SIGWINCH-style redraw before generating screenshots (default: false).
 
 Example: Start containers and exec into them as `developer` user:
 ```bash

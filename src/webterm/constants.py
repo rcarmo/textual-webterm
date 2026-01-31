@@ -21,10 +21,12 @@ def get_environ_bool(name: str) -> bool:
         name: Name of environment variable.
 
     Returns:
-        `True` if the env var is "1", otherwise `False`.
+        `True` if the env var is a truthy value, otherwise `False`.
     """
-    has_environ = get_environ(name) == "1"
-    return has_environ
+    value = get_environ(name)
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_environ_int(name: str, default: int) -> int:
@@ -49,3 +51,6 @@ def get_environ_int(name: str, default: int) -> int:
 
 DEBUG: Final = get_environ_bool("DEBUG")
 """Enable debug mode."""
+
+SCREENSHOT_FORCE_REDRAW_ENV: Final = "WEBTERM_SCREENSHOT_FORCE_REDRAW"
+"""Environment variable to force redraw before screenshots."""

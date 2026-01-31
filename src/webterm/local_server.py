@@ -42,6 +42,7 @@ DEFAULT_TERMINAL_SIZE = (132, 45)
 
 SCREENSHOT_CACHE_SECONDS = 0.3
 SCREENSHOT_MAX_CACHE_SECONDS = 20.0
+SCREENSHOT_FORCE_REDRAW = constants.get_environ_bool(constants.SCREENSHOT_FORCE_REDRAW_ENV)
 WS_SEND_QUEUE_MAX = 256
 WS_SEND_TIMEOUT = 2.0
 
@@ -842,6 +843,9 @@ class LocalServer:
                 cached_response = self._get_cached_screenshot_response(request, route_key)
                 if cached_response is not None:
                     return cached_response
+
+            if SCREENSHOT_FORCE_REDRAW and hasattr(session_process, "force_redraw"):
+                await session_process.force_redraw()  # type: ignore[union-attr]
 
             # Use non-mutating snapshot method to avoid affecting terminal state
             (
