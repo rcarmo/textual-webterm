@@ -263,6 +263,36 @@ class TestDockerWatcherIntegration:
 
         session_manager.add_app.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_handle_start_event_null_labels(self, session_manager):
+        """Container with null labels in Docker inspect response is handled gracefully."""
+        watcher = DockerWatcher(session_manager)
+
+        async def mock_request(method, path):
+            if "/containers/" in path and "/json" in path:
+                # Docker returns null for Labels when container has none
+                return (
+                    200,
+                    '{"Name": "/no-labels-container", "Config": {"Labels": null}}',
+                )
+            return 404, ""
+
+        watcher._docker_request = mock_request
+
+        event = {
+            "Action": "start",
+            "Actor": {
+                "ID": "container456",
+                "Attributes": {},
+            },
+        }
+
+        # Should not raise an exception
+        await watcher._handle_event(event)
+
+        # Should not add container (no webterm labels)
+        session_manager.add_app.assert_not_called()
+
 
 @pytest.mark.parametrize(
     ("labels", "expected"),

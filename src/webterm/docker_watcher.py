@@ -151,7 +151,7 @@ class DockerWatcher:
 
         If label is 'auto', empty, or missing, returns default exec command.
         """
-        labels = container.get("Labels", {})
+        labels = container.get("Labels") or {}
         label_value = labels.get(LABEL_NAME)
 
         if _is_auto_label(label_value):
@@ -159,7 +159,7 @@ class DockerWatcher:
         return label_value or AUTO_COMMAND_SENTINEL
 
     def _get_container_theme(self, container: dict) -> str | None:
-        labels = container.get("Labels", {})
+        labels = container.get("Labels") or {}
         value = labels.get(THEME_LABEL)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -287,12 +287,14 @@ class DockerWatcher:
             if status == 200:
                 container_info = json.loads(body)
                 # Convert to list format expected by _add_container
+                # Labels can be None if container has no labels
+                labels = container_info.get("Config", {}).get("Labels") or {}
                 container = {
                     "Id": container_id,
                     "Names": ["/" + container_info.get("Name", "").lstrip("/")],
-                    "Labels": container_info.get("Config", {}).get("Labels", {}),
+                    "Labels": labels,
                 }
-                if _has_webterm_label(container.get("Labels", {})):
+                if _has_webterm_label(labels):
                     await self._add_container(container)
         elif action == "die":
             await self._remove_container(container_id)
