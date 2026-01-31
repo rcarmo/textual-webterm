@@ -241,6 +241,37 @@ class TestSessionManager:
             assert isinstance(result, DockerExecSession)
             assert result.exec_spec.user == "testuser"
 
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(platform.system() == "Windows", reason="Terminal not supported on Windows")
+    async def test_new_docker_exec_session_container_placeholder(
+        self, mock_poller, mock_path, monkeypatch
+    ):
+        """Test that {container} placeholder in auto command is replaced with container name."""
+        from webterm.docker_exec_session import DockerExecSession
+
+        monkeypatch.setenv("WEBTERM_DOCKER_AUTO_COMMAND", "tmux new-session -ADs {container}")
+
+        app = App(
+            name="my-webapp",
+            slug="my-webapp",
+            path="./",
+            command=AUTO_COMMAND_SENTINEL,
+            terminal=True,
+        )
+        manager = SessionManager(mock_poller, mock_path, [app])
+
+        with patch.object(DockerExecSession, "open", new_callable=AsyncMock):
+            result = await manager.new_session(
+                "my-webapp",
+                SessionID("test-session"),
+                RouteKey("test-route"),
+            )
+
+            assert result is not None
+            assert isinstance(result, DockerExecSession)
+            # Verify the container name was substituted into the command
+            assert result.exec_spec.command == ["tmux", "new-session", "-ADs", "my-webapp"]
+
 
 class TestSessionManagerRoutes:
     """Tests for SessionManager route handling."""

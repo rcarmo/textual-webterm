@@ -139,9 +139,12 @@ class SessionManager:
             return None
         if app.command == AUTO_COMMAND_SENTINEL:
             docker_user = os.environ.get("WEBTERM_DOCKER_USERNAME")
+            # Support {container} placeholder in auto command for per-container customization
+            # e.g., WEBTERM_DOCKER_AUTO_COMMAND="tmux new-session -ADs {container}"
+            auto_cmd = _get_auto_command().replace("{container}", app.name)
             exec_spec = DockerExecSpec(
                 container=app.name,
-                command=shlex.split(_get_auto_command()),
+                command=shlex.split(auto_cmd),
                 user=docker_user,
             )
             session_process = DockerExecSession(self.poller, session_id, exec_spec)
