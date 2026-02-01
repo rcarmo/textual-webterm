@@ -179,6 +179,13 @@ async def test_update_screen_logs_on_exception(docker_exec_session):
 
 
 @pytest.mark.asyncio
+async def test_update_screen_preserves_utf8_bytes_with_c1_values(docker_exec_session):
+    await docker_exec_session._update_screen("✓ ok\r\n".encode())
+    lines = await docker_exec_session.get_screen_lines()
+    assert "✓ ok" in lines[0]
+
+
+@pytest.mark.asyncio
 async def test_add_to_replay_buffer_trims_old_data(docker_exec_session):
     first_chunk = b"a" * (REPLAY_BUFFER_SIZE - 1)
     second_chunk = b"b" * 10

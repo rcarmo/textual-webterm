@@ -118,6 +118,13 @@ class TestTerminalSession:
         assert lines[2] == "Line 3"
 
     @pytest.mark.asyncio
+    async def test_screen_preserves_utf8_bytes_with_c1_values(self, terminal_session):
+        """Ensure UTF-8 bytes containing 0x9c aren't corrupted by C1 normalization."""
+        await terminal_session._update_screen("✓ ok\r\n".encode())
+        lines = await terminal_session.get_screen_lines()
+        assert "✓ ok" in lines[0]
+
+    @pytest.mark.asyncio
     async def test_get_screen_state_returns_dirty_flag(self, terminal_session):
         """Test that get_screen_state returns has_changes flag based on pyte dirty tracking."""
         # After creation, all rows are dirty (initialized)

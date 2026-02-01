@@ -86,7 +86,8 @@ class DockerWatcher:
 
             # Read status line
             status_line = await reader.readline()
-            status_code = int(status_line.decode().split()[1])
+            status_line_text = status_line.decode("utf-8", errors="replace")
+            status_code = int(status_line_text.split()[1])
 
             # Read headers
             content_length = 0
@@ -95,7 +96,7 @@ class DockerWatcher:
                 line = await reader.readline()
                 if line == b"\r\n":
                     break
-                header = line.decode().lower()
+                header = line.decode("utf-8", errors="replace").lower()
                 if header.startswith("content-length:"):
                     content_length = int(header.split(":")[1].strip())
                 if "transfer-encoding: chunked" in header:
@@ -106,15 +107,15 @@ class DockerWatcher:
                 body_parts = []
                 while True:
                     size_line = await reader.readline()
-                    size = int(size_line.decode().strip(), 16)
+                    size = int(size_line.decode("utf-8", errors="replace").strip(), 16)
                     if size == 0:
                         break
                     chunk = await reader.readexactly(size)
                     body_parts.append(chunk)
                     await reader.readline()  # trailing CRLF
-                body = b"".join(body_parts).decode()
+                body = b"".join(body_parts).decode("utf-8", errors="replace")
             elif content_length > 0:
-                body = (await reader.readexactly(content_length)).decode()
+                body = (await reader.readexactly(content_length)).decode("utf-8", errors="replace")
             else:
                 body = ""
 
@@ -252,7 +253,7 @@ class DockerWatcher:
                         if not size_line:
                             break
                         try:
-                            size = int(size_line.decode().strip(), 16)
+                            size = int(size_line.decode("utf-8", errors="replace").strip(), 16)
                         except ValueError:
                             continue
                         if size == 0:
@@ -262,7 +263,7 @@ class DockerWatcher:
                         await reader.readline()  # trailing CRLF
 
                         try:
-                            event = json.loads(chunk.decode())
+                            event = json.loads(chunk.decode("utf-8", errors="replace"))
                             await self._handle_event(event)
                         except json.JSONDecodeError:
                             continue

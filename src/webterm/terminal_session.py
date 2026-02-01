@@ -55,26 +55,62 @@ PM_C1 = b"\x9e"
 APC_C1 = b"\x9f"
 
 
-def _normalize_c1_controls(data: bytes) -> bytes:
-    if (
-        CSI_C1 not in data
-        and OSC_C1 not in data
-        and ST_C1 not in data
-        and DCS_C1 not in data
-        and SOS_C1 not in data
-        and PM_C1 not in data
-        and APC_C1 not in data
-    ):
-        return data
-    return (
-        data.replace(CSI_C1, b"\x1b[")
-        .replace(OSC_C1, b"\x1b]")
-        .replace(ST_C1, b"\x1b\\")
-        .replace(DCS_C1, b"\x1bP")
-        .replace(SOS_C1, b"\x1bX")
-        .replace(PM_C1, b"\x1b^")
-        .replace(APC_C1, b"\x1b_")
-    )
+def _normalize_c1_controls(data: bytes, utf8_buffer: bytes = b"") -> tuple[bytes, bytes]:
+    if not data and not utf8_buffer:
+        return b"", b""
+    data = utf8_buffer + data
+    out = bytearray()
+    pending_utf8 = bytearray()
+    expected_continuations = 0
+    c1_map = {
+        0x9B: b"\x1b[",
+        0x9D: b"\x1b]",
+        0x9C: b"\x1b\\",
+        0x90: b"\x1bP",
+        0x98: b"\x1bX",
+        0x9E: b"\x1b^",
+        0x9F: b"\x1b_",
+    }
+    idx = 0
+    while idx < len(data):
+        byte = data[idx]
+        if expected_continuations:
+            if 0x80 <= byte <= 0xBF:
+                pending_utf8.append(byte)
+                expected_continuations -= 1
+                idx += 1
+                if expected_continuations == 0:
+                    out.extend(pending_utf8)
+                    pending_utf8.clear()
+                continue
+            out.extend(pending_utf8)
+            pending_utf8.clear()
+            expected_continuations = 0
+            continue
+        if 0xC2 <= byte <= 0xDF:
+            pending_utf8.append(byte)
+            expected_continuations = 1
+            idx += 1
+            continue
+        if 0xE0 <= byte <= 0xEF:
+            pending_utf8.append(byte)
+            expected_continuations = 2
+            idx += 1
+            continue
+        if 0xF0 <= byte <= 0xF4:
+            pending_utf8.append(byte)
+            expected_continuations = 3
+            idx += 1
+            continue
+        replacement = c1_map.get(byte)
+        if replacement is not None:
+            out.extend(replacement)
+        else:
+            out.append(byte)
+        idx += 1
+    if pending_utf8:
+        return bytes(out), bytes(pending_utf8)
+    return bytes(out), b""
 
 
 class TerminalSession(Session):
@@ -107,6 +143,7 @@ class TerminalSession(Session):
         self._last_snapshot_counter = 0
         # Buffer for handling escape sequences split across reads
         self._escape_buffer = b""
+        self._utf8_buffer = b""
         super().__init__()
 
     def __repr__(self) -> str:
@@ -219,7 +256,10 @@ class TerminalSession(Session):
         """Update the pyte screen with new terminal data."""
         async with self._screen_lock:
             try:
-                self._stream.feed(_normalize_c1_controls(data))
+                normalized, self._utf8_buffer = _normalize_c1_controls(data, self._utf8_buffer)
+                if not normalized:
+                    return
+                self._stream.feed(normalized)
                 # Increment change counter when screen is modified
                 if self._screen.dirty:
                     self._change_counter += 1
