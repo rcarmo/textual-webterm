@@ -678,19 +678,78 @@ class WebTerminal {
     this.element.appendChild(textarea);
     this.mobileInput = textarea;
 
-    const applyMobileModifiers = (text: string): string => {
-      let toSend = text;
-      if ((this.shiftActive || this.pendingShift) && toSend.length === 1) {
-        toSend = toSend.toUpperCase();
+    const shiftKeyMap: Record<string, string> = {
+      "`": "~",
+      "1": "!",
+      "2": "@",
+      "3": "#",
+      "4": "$",
+      "5": "%",
+      "6": "^",
+      "7": "&",
+      "8": "*",
+      "9": "(",
+      "0": ")",
+      "-": "_",
+      "=": "+",
+      "[": "{",
+      "]": "}",
+      "\\": "|",
+      ";": ":",
+      "'": "\"",
+      ",": "<",
+      ".": ">",
+      "/": "?",
+    };
+    const ctrlKeyMap: Record<string, string> = {
+      "2": "@",
+      "3": "[",
+      "4": "\\",
+      "5": "]",
+      "6": "^",
+      "7": "_",
+      "8": "?",
+    };
+    const applyShiftModifier = (key: string): string => {
+      if (key.length !== 1) {
+        return key;
       }
-      if ((this.ctrlActive || this.pendingCtrl) && toSend.length === 1) {
-        const code = toSend.toUpperCase().charCodeAt(0);
-        if (code >= 65 && code <= 90) {
-          toSend = String.fromCharCode(code - 64);
+      if (key >= "a" && key <= "z") {
+        return key.toUpperCase();
+      }
+      return shiftKeyMap[key] ?? key;
+    };
+    const applyCtrlModifier = (key: string): string => {
+      if (key.length !== 1) {
+        return key;
+      }
+      const mapped = ctrlKeyMap[key] ?? key;
+      if (mapped === "?") {
+        return "\x7f";
+      }
+      const code = mapped.toUpperCase().charCodeAt(0);
+      if (code >= 64 && code <= 95) {
+        return String.fromCharCode(code - 64);
+      }
+      return key;
+    };
+    const applyModifiers = (text: string, useShift: boolean, useCtrl: boolean): string => {
+      if (text.length !== 1) {
+        return text;
+      }
+      if (useCtrl) {
+        const ctrlApplied = applyCtrlModifier(text);
+        if (ctrlApplied !== text) {
+          return ctrlApplied;
         }
       }
-      return toSend;
+      if (useShift) {
+        return applyShiftModifier(text);
+      }
+      return text;
     };
+    const applyMobileModifiers = (text: string): string =>
+      applyModifiers(text, this.shiftActive || this.pendingShift, this.ctrlActive || this.pendingCtrl);
 
     const handleMobileInput = (text: string, e?: Event) => {
       if (e) {
@@ -742,14 +801,14 @@ class WebTerminal {
       const isCtrl = e.ctrlKey || this.ctrlActive;
       const isShift = e.shiftKey || this.shiftActive;
 
-      // Handle Ctrl+letter combinations (these don't fire input events)
+      // Handle Ctrl+key combinations (these don't fire input events)
       if (isCtrl && e.key.length === 1 && !e.altKey && !e.metaKey) {
-        const code = e.key.toUpperCase().charCodeAt(0);
-        if (code >= 65 && code <= 90) {
+        const ctrlApplied = applyCtrlModifier(e.key);
+        if (ctrlApplied !== e.key) {
           e.preventDefault();
           e.stopPropagation();
-          this.send(["stdin", String.fromCharCode(code - 64)]); // Ctrl+A=0x01, Ctrl+C=0x03, etc.
-          this.deactivateModifiers(); // Clear modifiers after physical Ctrl+letter
+          this.send(["stdin", ctrlApplied]); // Ctrl+A=0x01, Ctrl+C=0x03, etc.
+          this.deactivateModifiers(); // Clear modifiers after physical Ctrl+key
           return;
         }
       }
@@ -809,16 +868,7 @@ class WebTerminal {
       let handled = false;
 
       if (event.key.length === 1 && !event.altKey && !event.metaKey) {
-        let toSend = event.key;
-        if (useShift) {
-          toSend = toSend.toUpperCase();
-        }
-        if (useCtrl) {
-          const code = toSend.toUpperCase().charCodeAt(0);
-          if (code >= 65 && code <= 90) {
-            toSend = String.fromCharCode(code - 64);
-          }
-        }
+        const toSend = applyModifiers(event.key, useShift, useCtrl);
         event.preventDefault();
         event.stopPropagation();
         this.send(["stdin", toSend]);
