@@ -743,7 +743,7 @@ class WebTerminal {
       const isShift = e.shiftKey || this.shiftActive;
 
       // Handle Ctrl+letter combinations (these don't fire input events)
-      if (e.ctrlKey && e.key.length === 1 && !e.altKey && !e.metaKey) {
+      if (isCtrl && e.key.length === 1 && !e.altKey && !e.metaKey) {
         const code = e.key.toUpperCase().charCodeAt(0);
         if (code >= 65 && code <= 90) {
           e.preventDefault();
