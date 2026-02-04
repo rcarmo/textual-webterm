@@ -32,6 +32,10 @@ Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to
 - **No Authentication** - this is meant to be used inside a dedicated container, and you should set up an authenticating reverse proxy like `authelia`
 - **No Encryption (TLS/HTTPS)** - again, this is meant to be fronted by something like `traefik` or `caddy`
 
+## Known Issues
+
+- `pyte` (the library used to capture the underlying terminal state for screenshots) is buggier than a bait store and some partial screen clearing ANSI sequences don't work, resulting in occasionally mis-rendered screenshots. And yet, it is better than most other alternatives, so I'm waiting for `libghostty-vt` to be finished to port this whole thing to Go (or even plain C) and have full fidelity.
+
 ## Installation
 
 Install directly from GitHub:
