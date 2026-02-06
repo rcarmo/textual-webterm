@@ -168,7 +168,7 @@ class SessionManager:
         return session_process
 
     async def close_session(self, session_id: SessionID) -> None:
-        """Close a session.
+        """Close a session and remove it from tracking.
 
         Args:
             session_id: Session identity.
@@ -177,6 +177,7 @@ class SessionManager:
         if session_process is None:
             return
         await session_process.close()
+        self.on_session_end(session_id)
 
     def get_session(self, session_id: SessionID) -> Session | None:
         """Get a session from a session ID.

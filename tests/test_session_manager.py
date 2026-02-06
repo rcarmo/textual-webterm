@@ -137,17 +137,21 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_close_session(self, mock_poller, mock_path, sample_apps):
-        """Test closing a specific session."""
+        """Test closing a specific session removes it from tracking."""
         manager = SessionManager(mock_poller, mock_path, sample_apps)
 
         mock_session = MagicMock()
         mock_session.close = AsyncMock()
         session_id = SessionID("test-session")
+        route_key = RouteKey("test-route")
         manager.sessions[session_id] = mock_session
+        manager.routes[route_key] = session_id
 
         await manager.close_session(session_id)
 
         mock_session.close.assert_called_once()
+        assert session_id not in manager.sessions
+        assert route_key not in manager.routes
 
     @pytest.mark.asyncio
     async def test_close_session_nonexistent(self, mock_poller, mock_path, sample_apps):

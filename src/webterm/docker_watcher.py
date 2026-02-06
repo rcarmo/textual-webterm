@@ -211,19 +211,20 @@ class DockerWatcher:
         log.info("Removing container: %s", slug)
         del self._managed_containers[slug]
 
-        # Remove from session manager's apps
-        if slug in self._session_manager.apps_by_slug:
-            app = self._session_manager.apps_by_slug.pop(slug)
-            if app in self._session_manager.apps:
-                self._session_manager.apps.remove(app)
-
-        # Close any active session for this slug
-        route_key = slug  # In our case, slug is used as route_key
+        # Close any active session for this slug before removing the app,
+        # so session cleanup can still look up the app if needed.
+        route_key = slug
         session = self._session_manager.get_session_by_route_key(route_key)
         if session:
             session_id = self._session_manager.routes.get(route_key)
             if session_id:
                 await self._session_manager.close_session(session_id)
+
+        # Remove from session manager's apps
+        if slug in self._session_manager.apps_by_slug:
+            app = self._session_manager.apps_by_slug.pop(slug)
+            if app in self._session_manager.apps:
+                self._session_manager.apps.remove(app)
 
         if self._on_container_removed:
             self._on_container_removed(slug)

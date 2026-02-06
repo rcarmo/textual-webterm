@@ -142,7 +142,33 @@ class TestDockerWatcher:
         on_removed.assert_called_once_with("test-container")
 
     @pytest.mark.asyncio
-    async def test_remove_container_not_managed(self, session_manager):
+    async def test_remove_container_with_active_session(self, session_manager):
+        """Test removing a container that has an active session cleans up session."""
+        mock_session = MagicMock()
+        mock_app = MagicMock()
+        session_manager.apps_by_slug = {"test-container": mock_app}
+        session_manager.apps = [mock_app]
+        session_manager.get_session_by_route_key.return_value = mock_session
+        session_manager.routes = MagicMock()
+        session_manager.routes.get.return_value = "session-123"
+        session_manager.close_session = AsyncMock()
+
+        on_removed = MagicMock()
+        watcher = DockerWatcher(session_manager, on_container_removed=on_removed)
+        watcher._managed_containers["test-container"] = "abc123"
+
+        await watcher._remove_container("abc123")
+
+        # Session should be closed
+        session_manager.close_session.assert_called_once_with("session-123")
+
+        # App should be removed after session cleanup
+        assert "test-container" not in session_manager.apps_by_slug
+        assert mock_app not in session_manager.apps
+
+        # Container should be untracked
+        assert "test-container" not in watcher._managed_containers
+        on_removed.assert_called_once_with("test-container")
         """Test removing a container that's not managed."""
         on_removed = MagicMock()
         watcher = DockerWatcher(session_manager, on_container_removed=on_removed)
