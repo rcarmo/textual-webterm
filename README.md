@@ -35,6 +35,7 @@ Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to
 ## Known Issues
 
 - `pyte` (the library used to capture the underlying terminal state for screenshots) is buggier than a bait store and some partial screen clearing ANSI sequences don't work, resulting in occasionally mis-rendered screenshots. And yet, it is better than most other alternatives, so I'm waiting for `libghostty-vt` to be finished to port this whole thing to Go (or even plain C) and have full fidelity.
+- CLI frameworks like [Ink](https://github.com/vadimdemedes/ink) (used by GitHub Copilot CLI) clear their output using line-by-line erase sequences (`EL2+CUU1`) rather than full-screen erase (`ED2`). When `/clear` resets the framework's line counter, partial clears can leave ghost content in pyte's screen buffer. This is mitigated by `AltScreen.expand_clear_sequences()` — see [docs/ink-clear-fix.md](docs/ink-clear-fix.md) for details.
 
 ## Installation
 
@@ -267,7 +268,7 @@ make bundle-watch
 
 - WebSocket protocol (browser ↔ server) is JSON: `["stdin", data]`, `["resize", {"width": w, "height": h}]`, `["ping", data]`.
 - Frontend source is in `src/webterm/static/js/terminal.ts`.
-- Screenshots use [pyte](https://github.com/selectel/pyte) for ANSI interpretation and custom SVG rendering.
+- Screenshots use [pyte](https://github.com/selectel/pyte) for ANSI interpretation and custom SVG rendering. `AltScreen` adds alternate screen buffer support and [Ink partial clear expansion](docs/ink-clear-fix.md).
 - CPU stats are read directly from Docker socket using asyncio (no additional dependencies).
 
 ## Requirements
