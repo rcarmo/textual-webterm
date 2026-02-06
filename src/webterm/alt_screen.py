@@ -12,9 +12,15 @@ the screen buffer when switching between main and alternate screen modes.
 from __future__ import annotations
 
 import copy
+import re
 from typing import TYPE_CHECKING, Any
 
 import pyte
+
+# Pattern to match a run of 3+ (EL2 + CUU1) pairs used by Ink/React CLI
+# to erase the previous frame before drawing the next one.
+_INK_CLEAR_PATTERN = re.compile(rb"(\x1b\[2K\x1b\[1A){3,}")
+_EL2_CUU1 = b"\x1b[2K\x1b[1A"
 
 if TYPE_CHECKING:
     from pyte.screens import Char
@@ -125,3 +131,34 @@ class AltScreen(pyte.Screen):
             self._saved_cursor = None
 
         super().resize(lines, columns)
+
+    def expand_clear_sequences(self, data: bytes) -> bytes:
+        """Expand partial line-by-line clears to cover the full screen.
+
+        CLI frameworks like Ink (React for terminals) erase their previous
+        output using repeated ``EL2 + CUU1`` (erase line, cursor up) sequences.
+        When the application's ``/clear`` command resets the framework's internal
+        line counter, the next frame only erases a few lines instead of the full
+        previous output.  In a real terminal the old content has scrolled into the
+        scrollback buffer, but pyte keeps it visible, producing ghost content in
+        screenshots.
+
+        This method detects such partial clears and extends them so that all
+        lines from the cursor position up to row 0 are erased.
+        """
+        if _EL2_CUU1 not in data:
+            return data
+
+        cursor_y = self.cursor.y
+
+        def _extend(match: re.Match[bytes]) -> bytes:
+            nonlocal cursor_y
+            run = match.group(0)
+            pair_count = len(run) // len(_EL2_CUU1)
+            extra = cursor_y - pair_count
+            cursor_y = max(cursor_y - pair_count, 0)
+            if extra > 0:
+                return run + _EL2_CUU1 * extra
+            return run
+
+        return _INK_CLEAR_PATTERN.sub(_extend, data)

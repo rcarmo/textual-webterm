@@ -259,6 +259,7 @@ class TerminalSession(Session):
                 normalized, self._utf8_buffer = _normalize_c1_controls(data, self._utf8_buffer)
                 if not normalized:
                     return
+                normalized = self._screen.expand_clear_sequences(normalized)
                 self._stream.feed(normalized)
                 # Increment change counter when screen is modified
                 if self._screen.dirty:

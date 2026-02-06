@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shlex
@@ -70,7 +71,8 @@ class SessionManager:
         self.sessions.pop(session_id, None)
         route_key = self.routes.get_key(session_id)
         if route_key is not None:
-            del self.routes[route_key]
+            with contextlib.suppress(KeyError):
+                del self.routes[route_key]
         log.debug("Session %s ended", session_id)
 
     async def close_all(self, timeout: float = 3.0) -> None:

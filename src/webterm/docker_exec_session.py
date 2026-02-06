@@ -321,6 +321,7 @@ class DockerExecSession(Session):
                 normalized, self._utf8_buffer = _normalize_c1_controls(data, self._utf8_buffer)
                 if not normalized:
                     return
+                normalized = self._screen.expand_clear_sequences(normalized)
                 self._stream.feed(normalized)
                 if self._screen.dirty:
                     self._change_counter += 1

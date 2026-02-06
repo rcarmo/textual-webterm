@@ -105,6 +105,21 @@ class TestSessionManager:
         assert session_id not in manager.sessions
         assert route_key not in manager.routes
 
+    def test_on_session_end_idempotent(self, mock_poller, mock_path, sample_apps):
+        """Test session end cleanup is idempotent."""
+        manager = SessionManager(mock_poller, mock_path, sample_apps)
+
+        session_id = SessionID("test-session")
+        route_key = RouteKey("test-route")
+        manager.sessions[session_id] = MagicMock()
+        manager.routes[route_key] = session_id
+
+        manager.on_session_end(session_id)
+        manager.on_session_end(session_id)
+
+        assert session_id not in manager.sessions
+        assert route_key not in manager.routes
+
     def test_on_session_end_nonexistent(self, mock_poller, mock_path, sample_apps):
         """Test session end for non-existent session."""
         manager = SessionManager(mock_poller, mock_path, sample_apps)
