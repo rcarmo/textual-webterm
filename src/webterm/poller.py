@@ -73,6 +73,25 @@ class Poller(Thread):
             return
         await new_write.done_event.wait()
 
+    async def write_with_timeout(
+        self, file_descriptor: int, data: bytes, timeout: float = 2.0
+    ) -> bool:
+        """Write data to a file descriptor with a timeout.
+
+        Args:
+            file_descriptor: File descriptor.
+            data: Data to write.
+            timeout: Maximum seconds to wait for the write to complete.
+
+        Returns:
+            True if the write completed, False on timeout.
+        """
+        try:
+            await asyncio.wait_for(self.write(file_descriptor, data), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the asyncio loop.
 
@@ -110,20 +129,25 @@ class Poller(Thread):
                     if event_mask & writeable_events:
                         write_queue = self._write_queues.get(file_descriptor, None)
                         if write_queue:
-                            write = write_queue[0]
-                            remaining_data = write.data[write.position :]
-                            try:
-                                bytes_written = os.write(file_descriptor, remaining_data)
-                            except OSError:
-                                # Write failed; signal completion anyway to unblock waiters
-                                write_queue.popleft()
-                                loop.call_soon_threadsafe(write.done_event.set)
-                                continue
-                            write.position += bytes_written
-                            # Check if all data has been written
-                            if write.position >= len(write.data):
-                                write_queue.popleft()
-                                loop.call_soon_threadsafe(write.done_event.set)
+                            # Process all pending writes while fd is writable
+                            while write_queue:
+                                write = write_queue[0]
+                                remaining_data = write.data[write.position :]
+                                try:
+                                    bytes_written = os.write(file_descriptor, remaining_data)
+                                except OSError:
+                                    # Write failed; signal completion anyway to unblock waiters
+                                    write_queue.popleft()
+                                    loop.call_soon_threadsafe(write.done_event.set)
+                                    break
+                                write.position += bytes_written
+                                # Check if all data has been written
+                                if write.position >= len(write.data):
+                                    write_queue.popleft()
+                                    loop.call_soon_threadsafe(write.done_event.set)
+                                else:
+                                    # Partial write — fd buffer full, try again next cycle
+                                    break
                         else:
                             selector.modify(file_descriptor, readable_events)
 

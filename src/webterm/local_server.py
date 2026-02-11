@@ -45,6 +45,7 @@ SCREENSHOT_MAX_CACHE_SECONDS = 20.0
 SCREENSHOT_FORCE_REDRAW = constants.get_environ_bool(constants.SCREENSHOT_FORCE_REDRAW_ENV)
 WS_SEND_QUEUE_MAX = 256
 WS_SEND_TIMEOUT = 2.0
+STDIN_WRITE_TIMEOUT = 2.0
 
 
 WEBTERM_STATIC_PATH = Path(__file__).parent / "static"
@@ -446,6 +447,9 @@ class LocalServer:
         # SSE subscribers for activity notifications
         self._sse_subscribers: list[asyncio.Queue[str]] = []
 
+        # Background tasks for fire-and-forget stdin writes (prevent GC)
+        self._stdin_tasks: set[asyncio.Task] = set()
+
         # Docker stats collector (only used in compose mode)
         self._docker_stats: DockerStatsCollector | None = None
         # Docker watcher (only used in docker watch mode)
@@ -468,6 +472,18 @@ class LocalServer:
             return
         slug = slug or generate().lower()
         self.session_manager.add_app(name, command, slug=slug, terminal=True, theme=theme)
+
+    def _track_stdin_task(self, task: asyncio.Task, route_key: str) -> None:
+        self._stdin_tasks.add(task)
+        task.add_done_callback(lambda done: self._finalize_stdin_task(done, route_key))
+
+    def _finalize_stdin_task(self, task: asyncio.Task, route_key: str) -> None:
+        self._stdin_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            log.warning("Stdin write task failed for route %s: %s", route_key, exc)
 
     async def run(self) -> None:
         try:
@@ -655,7 +671,23 @@ class LocalServer:
         data = envelope[1] if len(envelope) > 1 else ""
         session_process = self.session_manager.get_session_by_route_key(RouteKey(route_key))
         if session_process:
-            await session_process.send_bytes(data.encode("utf-8"))
+            # Fire-and-forget: don't block the WS receive loop waiting for the
+            # PTY fd to become writable.  A slow or stalled child process must
+            # never prevent subsequent keystrokes from being dispatched.
+            task = asyncio.create_task(self._write_stdin(session_process, data, route_key))
+            self._track_stdin_task(task, route_key)
+
+    async def _write_stdin(self, session_process, data: str, route_key: str) -> None:
+        """Write stdin data to session with a timeout to avoid indefinite stalls."""
+        try:
+            await asyncio.wait_for(
+                session_process.send_bytes(data.encode("utf-8")),
+                timeout=STDIN_WRITE_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            log.warning("Stdin write timeout for route %s; dropping input", route_key)
+        except OSError as exc:
+            log.warning("Stdin write failed for route %s: %s", route_key, exc)
 
     async def _handle_resize(
         self, envelope: list, route_key: str, _ws: web.WebSocketResponse

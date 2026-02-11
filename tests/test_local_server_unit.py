@@ -12,6 +12,14 @@ from webterm.local_server import (
 )
 
 
+async def wait_for_asyncmock_call(mock: AsyncMock, timeout: float = 0.1) -> None:
+    async def _wait() -> None:
+        while mock.await_count == 0:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(_wait(), timeout=timeout)
+
+
 class TestGetStaticPath:
     """Tests for static path."""
 
@@ -599,6 +607,8 @@ class TestLocalServerMoreCoverage:
         ws = MagicMock()
         created = await server_with_no_apps._dispatch_ws_message(["stdin"], "rk", ws, False)
         assert created is False
+        # stdin writes are fire-and-forget; wait until send_bytes is awaited
+        await wait_for_asyncmock_call(session.send_bytes)
         session.send_bytes.assert_awaited_once_with(b"")
 
     @pytest.mark.asyncio
@@ -744,3 +754,59 @@ class TestLocalServerMoreCoverage:
 
         assert not queue.empty()
         assert queue.get_nowait() == "my-route"
+
+    @pytest.mark.asyncio
+    async def test_handle_stdin_does_not_block_ws_loop(
+        self, server_with_no_apps, monkeypatch
+    ):
+        """Stdin writes should be fire-and-forget so the WS loop keeps processing."""
+        send_started = asyncio.Event()
+        send_gate = asyncio.Event()
+
+        async def slow_send(_data):
+            send_started.set()
+            await send_gate.wait()
+            return True
+
+        session = MagicMock()
+        session.send_bytes = AsyncMock(side_effect=slow_send)
+        monkeypatch.setattr(
+            server_with_no_apps.session_manager, "get_session_by_route_key", lambda _rk: session
+        )
+
+        ws = MagicMock()
+        # _dispatch_ws_message should return immediately even though send_bytes blocks
+        created = await server_with_no_apps._dispatch_ws_message(
+            ["stdin", "hello"], "rk", ws, False
+        )
+        assert created is False
+
+        # The background task should have been created but not finished
+        await send_started.wait()
+        assert not send_gate.is_set()
+
+        # Unblock and let the task finish
+        send_gate.set()
+        await asyncio.sleep(0)
+
+    @pytest.mark.asyncio
+    async def test_write_stdin_logs_timeout(
+        self, server_with_no_apps, monkeypatch, caplog
+    ):
+        """_write_stdin should log a warning and not raise on timeout."""
+        async def hang_forever(_data):
+            await asyncio.sleep(999)
+            return True
+
+        session = MagicMock()
+        session.send_bytes = AsyncMock(side_effect=hang_forever)
+
+        import logging
+
+        # Use a very short timeout for testing
+        monkeypatch.setattr("webterm.local_server.STDIN_WRITE_TIMEOUT", 0.01)
+
+        with caplog.at_level(logging.WARNING, logger="webterm"):
+            await server_with_no_apps._write_stdin(session, "x", "rk")
+
+        assert "Stdin write timeout" in caplog.text

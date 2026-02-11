@@ -5,6 +5,10 @@ from click.testing import CliRunner
 from webterm import cli
 
 
+def _close_coroutine(coro) -> None:
+    coro.close()
+
+
 class TestCLI:
     """Tests for CLI command."""
 
@@ -31,7 +35,7 @@ class TestCLI:
                 calls["run"] = True
 
         monkeypatch.setattr(cli, "LocalServer", FakeServer)
-        monkeypatch.setattr(cli.asyncio, "run", lambda _coro: None)
+        monkeypatch.setattr(cli.asyncio, "run", _close_coroutine)
 
         runner = CliRunner()
         result = runner.invoke(cli.app, ["htop"])
@@ -55,7 +59,7 @@ class TestCLI:
 
         monkeypatch.setenv("SHELL", "/bin/zsh")
         monkeypatch.setattr(cli, "LocalServer", FakeServer)
-        monkeypatch.setattr(cli.asyncio, "run", lambda _coro: None)
+        monkeypatch.setattr(cli.asyncio, "run", _close_coroutine)
 
         runner = CliRunner()
         result = runner.invoke(cli.app, [])
@@ -131,7 +135,11 @@ def test_cli_docker_watch_mode(monkeypatch):
             calls["run"] = True
 
     monkeypatch.setattr(cli, "LocalServer", FakeServer)
-    monkeypatch.setattr(cli.asyncio, "run", lambda _coro: calls.setdefault("run", True))
+    def run_and_close(coro):
+        calls.setdefault("run", True)
+        coro.close()
+
+    monkeypatch.setattr(cli.asyncio, "run", run_and_close)
     monkeypatch.setattr(cli.constants, "DEBUG", True)
 
     runner = CliRunner()
@@ -155,7 +163,11 @@ def test_cli_windows_branch(monkeypatch):
 
     monkeypatch.setattr(cli, "LocalServer", FakeServer)
     monkeypatch.setattr(cli.constants, "WINDOWS", True)
-    monkeypatch.setattr(cli.asyncio, "run", lambda _coro: calls.setdefault("run", True))
+    def run_and_close(coro):
+        calls.setdefault("run", True)
+        coro.close()
+
+    monkeypatch.setattr(cli.asyncio, "run", run_and_close)
 
     runner = CliRunner()
     result = runner.invoke(cli.app, ["--docker-watch"])
