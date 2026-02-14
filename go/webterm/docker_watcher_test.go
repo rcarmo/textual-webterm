@@ -21,3 +21,11 @@ func TestDockerWatcherCommandAndThemeParsing(t *testing.T) {
 		t.Fatalf("unexpected slug: %q", slug)
 	}
 }
+
+func TestDockerWatcherCanRestart(t *testing.T) {
+	watcher := NewDockerWatcher(NewSessionManager(nil), "/tmp/does-not-exist.sock", nil, nil)
+	watcher.Start()
+	watcher.Stop()
+	watcher.Start()
+	watcher.Stop()
+}

@@ -199,8 +199,8 @@ func (w *DockerWatcher) handleEvent(event map[string]any) {
 	}
 }
 
-func (w *DockerWatcher) watchEvents(ctx context.Context) {
-	defer close(w.waitDone)
+func (w *DockerWatcher) watchEvents(ctx context.Context, waitDone chan struct{}) {
+	defer close(waitDone)
 	filters := url.QueryEscape(`{"event":["start","die"],"type":["container"]}`)
 	requestURL := "http://unix/events?filters=" + filters
 	for {
@@ -252,12 +252,14 @@ func (w *DockerWatcher) Start() {
 		w.mu.Unlock()
 		return
 	}
+	waitDone := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
+	w.waitDone = waitDone
 	w.running = true
 	w.mu.Unlock()
 	w.ScanExisting()
-	go w.watchEvents(ctx)
+	go w.watchEvents(ctx, waitDone)
 }
 
 func (w *DockerWatcher) Stop() {
@@ -268,9 +270,10 @@ func (w *DockerWatcher) Stop() {
 	}
 	w.running = false
 	cancel := w.cancel
+	waitDone := w.waitDone
 	w.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	<-w.waitDone
+	<-waitDone
 }

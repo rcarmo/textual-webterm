@@ -1,65 +1,28 @@
 # Screenshot Debugging Skill
 
 ## Purpose
-Diagnose terminal screenshot corruption caused by incomplete escape-sequence handling.
+Diagnose terminal screenshot corruption caused by incomplete terminal-state updates.
 
 ## When to Use
-- SVG screenshot shows stale or overlaid content after clear/redraw.
-- Behavior differs between live terminal output and screenshot snapshots.
-- Issues appear inside tmux/vim/less or other full-screen TUIs.
+- SVG screenshots show stale or overlaid text.
+- Live WebSocket output looks correct but `/screenshot.svg` does not.
+- Issues appear with full-screen TUIs (tmux/vim/less).
 
 ## Procedure
-1. **Reproduce and capture raw output**
-   - Capture PTY output around the failing action (e.g., `clear` inside tmux).
-   - Ensure capture includes the full sequence before and after the command.
-
-2. **Replay into the emulator**
-   - Feed captured bytes into the same emulator used for screenshots (pyte + AltScreen).
-   - Inspect the rendered buffer for stale cells or overlay.
-
-3. **Scan for unhandled escape modes**
-   - Look for private modes: `?47`, `?1047`, `?1048`, `?1049`.
-   - Check erase semantics: `ED` (`J`), `EL` (`K`), `ECH` (`X`).
-   - Verify C1 controls are normalized to 7-bit ESC equivalents.
-
-4. **Fix emulator handling**
-   - Update AltScreen to recognize any missing alternate buffer modes (e.g., `?47`).
-   - Ensure mode toggles save/restore the main buffer and mark dirty lines.
-
+1. **Capture terminal bytes**
+   - Capture PTY output around the failing action.
+2. **Replay into the Go tracker**
+   - Feed bytes through `internal/terminalstate` (go-te based).
+   - Confirm whether buffer state diverges from expected terminal behavior.
+3. **Check preprocessing/filtering**
+   - Validate DA filtering and any partial-sequence buffering logic.
+4. **Check dirty/refresh logic**
+   - Verify tracker updates happen before screenshot cache decisions.
 5. **Add regression coverage**
-   - Add a focused test that replays the sequence and asserts the buffer is cleared.
-   - Include any new mode variants in existing parameterized tests.
-
+   - Add a focused Go test and (when useful) fuzz corpus seed.
 6. **Verify**
-   - Run `make check`.
-   - Re-test the real scenario and confirm screenshots match the live terminal.
-
-## Minimal Capture Snippet (PTY -> pyte)
-```python
-import os, pty, select, time, pyte
-from webterm.alt_screen import AltScreen
-
-def read_all(fd, timeout=0.5):
-    out = b""
-    end = time.time() + timeout
-    while time.time() < end:
-        r, _, _ = select.select([fd], [], [], 0.05)
-        if not r:
-            continue
-        try:
-            data = os.read(fd, 4096)
-        except OSError:
-            break
-        if not data:
-            break
-        out += data
-    return out
-
-screen = AltScreen(80, 24)
-stream = pyte.ByteStream(screen)
-stream.feed(raw_bytes)
-```
+   - Run `make check` and re-test the real scenario.
 
 ## Notes
-- tmux often uses `DECSET ?47` (legacy alt buffer) instead of `?1049`.
-- Always validate with real output captures, not just synthetic sequences.
+- Prefer reproductions from real PTY captures over synthetic minimal sequences.
+- If rendering differs only in dashboard thumbnails, inspect SSE activity gating and screenshot cache TTL/invalidations.

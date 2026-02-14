@@ -136,15 +136,7 @@ func (s *TerminalSession) handleOutput(data []byte) {
 	tracker := s.tracker
 	connector := s.connector
 	s.mu.Unlock()
-
-	if len(filtered) == 0 {
-		return
-	}
-	s.replay.Add(filtered)
-	if tracker != nil {
-		_ = tracker.Feed(filtered)
-	}
-	connector.OnData(filtered)
+	dispatchSessionOutput(filtered, tracker, s.replay, connector)
 }
 
 func (s *TerminalSession) Close() error {
@@ -233,15 +225,9 @@ func (s *TerminalSession) GetReplayBuffer() []byte {
 func (s *TerminalSession) GetScreenSnapshot() terminalstate.Snapshot {
 	s.mu.RLock()
 	tracker := s.tracker
+	width, height := s.width, s.height
 	s.mu.RUnlock()
-	if tracker == nil {
-		return terminalstate.Snapshot{
-			Width:  s.width,
-			Height: s.height,
-			Buffer: make([][]terminalstate.Cell, s.height),
-		}
-	}
-	return tracker.Snapshot()
+	return snapshotFromTracker(tracker, width, height)
 }
 
 func (s *TerminalSession) UpdateConnector(connector SessionConnector) {

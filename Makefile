@@ -1,53 +1,38 @@
-.PHONY: help install install-dev lint format test coverage check clean clean-all build build-all build-fast bundle bundle-watch bundle-clean typecheck bump-patch push
+.PHONY: help install install-dev lint format test race coverage check fuzz build-go build build-fast bundle bundle-watch bundle-clean clean clean-all build-all typecheck
 
-PYTHON ?= python3
-PIP ?= $(PYTHON) -m pip
-
-# Static assets
-STATIC_JS_DIR = src/webterm/static/js
+GO_DIR = go
+STATIC_JS_DIR = go/webterm/static/js
+TERMINAL_TS = $(STATIC_JS_DIR)/terminal.ts
 TERMINAL_JS = $(STATIC_JS_DIR)/terminal.js
 GHOSTTY_WASM = $(STATIC_JS_DIR)/ghostty-vt.wasm
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-# =============================================================================
-# Full reproducible build
-# =============================================================================
+install: ## Download Go dependencies
+	cd $(GO_DIR) && go mod download
 
-build-all: clean-all node_modules build install-dev check ## Full reproducible build (clean + deps + bundle + install)
-	@echo "Build complete!"
+install-dev: install node_modules ## Install Go and frontend dependencies
 
-# =============================================================================
-# Python targets
-# =============================================================================
-# NOTE: Install dev tools (ruff/pytest/etc.) using `pip install --user --break-system-packages`
-# from the dev dependency list (pyproject.toml or requirements-dev.txt).
+lint: ## Run Go vet
+	cd $(GO_DIR) && go vet ./...
 
-install: ## Install package in editable mode
-	$(PIP) install -e .
+format: ## Format Go code
+	cd $(GO_DIR) && gofmt -w ./cmd ./internal ./webterm
 
-install-dev: install ## Install with dev dependencies
-	$(PIP) install aiohttp uvloop click pydantic importlib-metadata tomli pyyaml pyte
-	$(PIP) install pytest pytest-asyncio pytest-cov pytest-timeout ruff
+test: ## Run Go tests
+	cd $(GO_DIR) && go test ./...
 
-lint: ## Run ruff linter
-	ruff check src tests
+race: ## Run Go race tests
+	cd $(GO_DIR) && go test -race ./...
 
-format: ## Format code with ruff
-	ruff format src tests
+coverage: ## Run Go coverage for runtime package
+	cd $(GO_DIR) && go test ./webterm -coverprofile=coverage.out && go tool cover -func=coverage.out
 
-test: ## Run pytest
-	pytest
+check: lint test coverage ## Run lint + tests + coverage
 
-coverage: ## Run pytest with coverage
-	pytest --cov=src/webterm --cov-report=term-missing
-
-check: lint coverage ## Run lint + coverage
-
-# =============================================================================
-# Frontend build targets (requires Bun: https://bun.sh)
-# =============================================================================
+fuzz: ## Run all fuzz tests briefly
+	cd $(GO_DIR) && go test ./... -run=^$$ -fuzz=Fuzz -fuzztime=1s
 
 node_modules: package.json
 	bun install
@@ -69,40 +54,16 @@ bundle-watch: node_modules ## Watch mode for frontend development
 	@test -f $(GHOSTTY_WASM) || bun run copy-wasm
 	bun run watch
 
-# =============================================================================
-# Clean targets
-# =============================================================================
+build-go: ## Build Go CLI binary
+	cd $(GO_DIR) && mkdir -p bin && go build -o ./bin/webterm ./cmd/webterm
 
-clean: ## Remove Python cache files
-	rm -rf .pytest_cache .coverage htmlcov .ruff_cache __pycache__ src/**/__pycache__
+clean: ## Remove coverage artifacts
+	rm -f $(GO_DIR)/coverage.out
 
-bundle-clean: ## Remove frontend build artifacts
-	rm -rf node_modules bun.lock $(TERMINAL_JS) $(GHOSTTY_WASM)
+bundle-clean: ## Remove frontend dependencies
+	rm -rf node_modules bun.lock
 
-clean-all: clean bundle-clean ## Remove everything (clean + bundle-clean)
+clean-all: clean bundle-clean ## Remove all generated artifacts
 
-# =============================================================================
-# Version management
-# =============================================================================
-
-bump-patch: ## Bump patch version and create git tag
-	@OLD=$$(grep -Po '(?<=^version = ")[^"]+' pyproject.toml); \
-	MAJOR=$$(echo $$OLD | cut -d. -f1); \
-	MINOR=$$(echo $$OLD | cut -d. -f2); \
-	PATCH=$$(echo $$OLD | cut -d. -f3); \
-	NEW="$$MAJOR.$$MINOR.$$((PATCH + 1))"; \
-	sed -i "s/^version = \"$$OLD\"/version = \"$$NEW\"/" pyproject.toml; \
-	git add pyproject.toml; \
-	git commit -m "Bump version to $$NEW"; \
-	git tag "v$$NEW"; \
-	echo "Bumped version: $$OLD -> $$NEW (tagged v$$NEW)"
-
-push: ## Push commits and current tag to origin
-	@TAG=$$(git describe --tags --exact-match 2>/dev/null); \
-	git push origin main; \
-	if [ -n "$$TAG" ]; then \
-		echo "Pushing tag $$TAG..."; \
-		git push origin "$$TAG"; \
-	else \
-		echo "No tag on current commit"; \
-	fi
+build-all: clean-all install-dev build check build-go ## Full reproducible build from scratch
+	@echo "Build complete!"

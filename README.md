@@ -1,289 +1,118 @@
-# webterm
+# webterm (Go)
 
 ![Icon](docs/icon-256.png)
 
-Serve terminal sessions over the web with a simple CLI command. [Blog post](https://taoofmac.com/space/notes/2026/01/25/2030#seizing-the-means-of-production)
-
-> **Credit and Inspiration:** This project was originally based on the genius [textual-web](https://github.com/Textualize/textual-web) package, which uses `xterm.js`. It has been rewritten to use a [ghostty-web](https://github.com/coder/ghostty-web)'s WebAssembly-based terminal emulator, which provides better performance and native theme support. 
-
-It is, for the moment, temporarily based on a [patched version of ghostty-web](https://github.com/rcarmo/ghostty-web), because the current version has bugs and feature gaps that I needed to fill.
-
-Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to keep track of several containerized AI coding agents, since it provides an easy way to expose terminal sessions via HTTP/WebSocket with automatic reconnection support:
+`webterm` serves terminal sessions over HTTP/WebSocket, with a dashboard mode for multiple sessions and Docker-aware tiles.
 
 ![Screenshot](docs/screenshot.png)
 
 ## Features
 
-- **Web-based terminal** - Access your terminal from any browser
-- **Mobile support** - Works on iOS Safari and Android with on-screen keyboard modifier (experimental) and touch selection
-- **Session reconnection** - Refresh the page and reconnect to the same session
-- **Full terminal emulation** - Colors, cursor, and ANSI codes work correctly
-- **Customizable themes** - 9 built-in themes (monokai, dracula, nord, etc.)
-- **Custom fonts** - Configure terminal font family and size
-- **Scrollback history** - Scroll back through terminal output (configurable)
-- **Auto-sizing** - Terminal automatically resizes to fit the browser window
-- **Live screenshots** - Dashboard shows real-time SVG screenshots of terminals
-- **CPU sparklines** - Dashboard displays 30-minute CPU history for Docker containers
-- **SSE updates** - Real-time screenshot updates via Server-Sent Events
-- **Simple CLI** - One command to start serving
+- Web terminal with reconnect support
+- Session dashboard with live SVG screenshots
+- Docker watch mode (`webterm-command` / `webterm-theme` labels)
+- Docker compose manifest ingestion
+- CPU sparkline tiles for compose services
+- SSE activity updates for fast dashboard refresh
+- Theme/font controls for terminal rendering
 
-## Non-Features
+## Install
 
-- **No Authentication** - this is meant to be used inside a dedicated container, and you should set up an authenticating reverse proxy like `authelia`
-- **No Encryption (TLS/HTTPS)** - again, this is meant to be fronted by something like `traefik` or `caddy`
-
-## Known Issues
-
-- `pyte` (the library used to capture the underlying terminal state for screenshots) does not implement some standard escape sequences, resulting in occasionally mis-rendered screenshots. We monkeypatch pyte at runtime to add missing support (CSI S/T scroll, alternate screen buffers, etc.) — see [docs/pyte-patches.md](docs/pyte-patches.md) for details.
-
-## Installation
-
-Install directly from GitHub:
-
-```bash
-pip install git+https://github.com/rcarmo/webterm.git
-```
-
-## Quick Start
-
-### Serve a Terminal
-
-Serve your default shell:
-
-```bash
-webterm
-```
-
-Serve a specific command:
-
-```bash
-webterm htop
-```
-
-### Options
-
-Specify host and port:
-
-```bash
-webterm --host 0.0.0.0 --port 8080 bash
-```
-
-Customize theme and font:
-
-```bash
-webterm --theme dracula --font-size 18
-webterm --theme nord --font-family "JetBrains Mono, monospace"
-```
-
-Available themes: `xterm` (default), `monokai`, `dark`, `light`, `dracula`, `catppuccin`, `nord`, `gruvbox`, `solarized`, `tokyo`.
-
-Then open http://localhost:8080 in your browser.
-
-## Session Dashboard
-
-You can serve a dashboard with multiple terminal tiles driven by a YAML manifest:
-
-```yaml
-- name: My Service
-  slug: my-service
-  command: docker logs -f my-service
-```
-
-Run with:
-
-```bash
-webterm --landing-manifest landing.yaml
-```
-
-### Docker Watch Mode
-
-Watch for Docker containers with `webterm-command` **or** `webterm-theme` labels and dynamically add/remove terminal sessions:
-
-```bash
-webterm --docker-watch
-```
-
-When a container starts with either label, it automatically appears in the dashboard. When it stops, it's removed. Label values:
-
-- `webterm-command: auto` (or empty) - Opens a PTY via Docker exec API (override with `WEBTERM_DOCKER_AUTO_COMMAND`)
-- `webterm-command: <command>` - Runs the specified command
-- `webterm-theme: <theme>` - Sets the terminal theme for that container (xterm, monokai, dark, light, dracula, catppuccin, nord, gruvbox, solarized, tokyo). Invalid themes fall back to `tango` and the page background defaults to black.
-
-Containers that only specify `webterm-theme` are still included and use the default auto command.
-
-**Environment Variables:**
-- `WEBTERM_DOCKER_USERNAME` - Set to run Docker exec sessions as a specific user (default: root)
-- `WEBTERM_DOCKER_AUTO_COMMAND` - Override the default `auto` command (default: `/bin/bash`). Supports `{container}` placeholder for the container name.
-- `WEBTERM_SCREENSHOT_FORCE_REDRAW` - When set to `true`, send a SIGWINCH-style redraw before generating screenshots (default: false).
-
-Example: Start containers and exec into them as `developer` user:
-```bash
-WEBTERM_DOCKER_USERNAME=developer webterm --docker-watch
-```
-
-Example: Use tmux with per-container session names:
-```bash
-WEBTERM_DOCKER_AUTO_COMMAND="tmux new-session -ADs {container}" webterm --docker-watch
-```
-This creates a tmux session named after each container (e.g., `my-webapp`, `redis`, etc.) instead of a shared session name.
-
-Example docker-compose.yaml:
-
-```yaml
-services:
-  myapp:
-    image: myapp:latest
-    labels:
-      webterm-command: auto  # Opens bash in container
-      webterm-theme: monokai
-  
-  logs:
-    image: myapp:latest  
-    labels:
-      webterm-command: docker logs -f myapp  # Shows logs
-      webterm-theme: nord
-```
-
-**Requires**: Docker socket access (`-v /var/run/docker.sock:/var/run/docker.sock`)
-
-### Docker Compose Integration
-
-Point to a docker-compose file; services with the label `webterm-command` become tiles (and `webterm-theme` applies there too):
-
-```yaml
-services:
-  db:
-    image: postgres
-    labels:
-      webterm-command: docker exec -it db psql
-      webterm-theme: gruvbox
-```
-
-Start with:
-
-```bash
-webterm --compose-manifest compose.yaml
-```
-
-In compose mode, the dashboard displays **CPU sparklines** showing 30 minutes of container CPU usage history (requires access to Docker socket at `/var/run/docker.sock`).
-
-### Dashboard Features
-
-- **Live screenshots** - Terminal thumbnails update in real-time via SSE when activity occurs
-- **Dynamic updates** - In docker-watch mode, tiles appear/disappear as containers start/stop
-- **CPU sparklines** - Mini charts showing container CPU usage (compose mode only)
-- **Tab reuse** - Clicking the same tile reopens the existing browser tab
-- **Auto-focus** - Terminals automatically receive keyboard focus on load
-
-## CLI Reference
-
-```
-Usage: webterm [OPTIONS] [COMMAND]
-
-  Serve a terminal over HTTP/WebSocket.
-
-  COMMAND: Shell command to run in terminal (default: $SHELL)
-
-Options:
-  -H, --host TEXT               Host to bind to [default: 0.0.0.0]
-  -p, --port INTEGER            Port to bind to [default: 8080]
-  -L, --landing-manifest PATH   YAML manifest describing landing page tiles
-                                (slug/name/command).
-  -C, --compose-manifest PATH   Docker compose YAML; services with label
-                                "webterm-command" become landing tiles.
-  -D, --docker-watch            Watch Docker for containers with
-                                "webterm-command" label (dynamic mode).
-  -t, --theme TEXT              Terminal color theme [default: xterm]
-                                Options: xterm, monokai, dark, light, dracula,
-                                catppuccin, nord, gruvbox, solarized, tokyo
-  -f, --font-family TEXT        Terminal font family (CSS font stack)
-  -s, --font-size INTEGER       Terminal font size in pixels [default: 16]
-  --version                     Show the version and exit.
-  --help                        Show this message and exit.
-```
-
-## API Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `/` | Dashboard (with manifest/docker-watch) or terminal view |
-| `/ws/{route_key}` | WebSocket for terminal I/O |
-| `/screenshot.svg?route_key=...` | SVG screenshot of terminal |
-| `/cpu-sparkline.svg?container=...` | CPU sparkline SVG (compose mode) |
-| `/tiles` | JSON list of current tiles (for dynamic dashboards) |
-| `/events` | SSE stream for activity notifications |
-| `/health` | Health check endpoint |
-
-## Development
-
-### Setup (Makefile-first)
+### Build from source
 
 ```bash
 git clone https://github.com/rcarmo/webterm.git
-cd webterm
+cd webterm/go
+mkdir -p bin
+go build -o ./bin/webterm ./cmd/webterm
+```
 
-# Install with dev dependencies via Makefile
+The command above produces `go/bin/webterm`; you can also build it from repo root with `make build-go`.
+
+## Quick start
+
+Run a default shell session:
+
+```bash
+cd go
+go run ./cmd/webterm
+```
+
+Run a specific command:
+
+```bash
+cd go
+go run ./cmd/webterm -- htop
+```
+
+Then open <http://localhost:8080>.
+
+## Dashboard modes
+
+### Landing manifest
+
+```yaml
+- name: Logs
+  slug: logs
+  command: docker logs -f my-service
+  theme: nord
+```
+
+```bash
+cd go
+go run ./cmd/webterm -- --landing-manifest ../landing.yaml
+```
+
+### Docker watch
+
+```bash
+cd go
+go run ./cmd/webterm -- --docker-watch
+```
+
+Containers with these labels become tiles:
+
+- `webterm-command`: command string, or `auto` for Docker exec
+- `webterm-theme`: theme name (fallback is `xterm` palette)
+
+### Compose manifest
+
+```bash
+cd go
+go run ./cmd/webterm -- --compose-manifest ../docker-compose.yaml
+```
+
+## Environment variables
+
+- `WEBTERM_STATIC_PATH`: override static asset directory
+- `WEBTERM_DOCKER_USERNAME`: user for Docker exec sessions
+- `WEBTERM_DOCKER_AUTO_COMMAND`: override auto command (`/bin/bash` default)
+- `WEBTERM_SCREENSHOT_FORCE_REDRAW`: force redraw before screenshots (`true/1/yes/on`)
+- `DOCKER_HOST`: Docker daemon endpoint override
+
+## Development (Makefile-first)
+
+```bash
 make install-dev
+make check
+make race
+make test
 ```
 
-### Common tasks (use Makefile)
-
-- Lint: `make lint`
-- Format: `make format`
-- Tests: `make test`
-- Coverage (fail_under=78): `make coverage`
-- Full check (lint + coverage): `make check`
-- Bump patch version: `make bump-patch`
-
-### Frontend Development
-
-The terminal UI is built with a [patched version of ghostty-web](https://github.com/rcarmo/ghostty-web), which provides Ghostty's VT100 parser via WebAssembly with native theme/palette support. This replaces the original xterm.js dependency used in earlier versions.
-
-Key improvements over xterm.js:
-- Native theme colors passed directly to WASM (no runtime color remapping)
-- Smaller bundle size (~0.67 MB vs ~1.16 MB)
-- IME input support for CJK languages
-- Better Unicode and complex script rendering
-
-The pre-built bundle is committed to the repo, so users can `pip install` without needing Node.js.
-
-To rebuild the frontend after modifying `terminal.ts`:
+Frontend bundle tasks:
 
 ```bash
-# Requires Bun (https://bun.sh)
-bun install
-bun run build
-# Or simply:
-make bundle
-```
-
-For development with auto-rebuild:
-
-```bash
+make build
+make build-fast
 make bundle-watch
 ```
 
-### Notes
+## Docker
 
-- WebSocket protocol (browser ↔ server) is JSON: `["stdin", data]`, `["resize", {"width": w, "height": h}]`, `["ping", data]`.
-- Frontend source is in `src/webterm/static/js/terminal.ts`.
-- Screenshots use [pyte](https://github.com/selectel/pyte) for ANSI interpretation and custom SVG rendering. `AltScreen` adds alternate screen buffer support, [CSI S/T scroll handling, and Ink partial clear expansion](docs/pyte-patches.md).
-- Go runtime port is in `go/webterm` (entrypoint: `go/cmd/webterm`), using [go-te](https://github.com/rcarmo/go-te) for terminal state and screenshots.
-- CPU stats are read directly from Docker socket using asyncio (no additional dependencies).
+```bash
+docker build -t webterm .
+docker run -v /var/run/docker.sock:/var/run/docker.sock -p 8080:8080 webterm --docker-watch
+```
 
-## Requirements
-
-- Python 3.9+
-- Bun
-- Linux or macOS
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Related Projects
-
-- [ghostty-web](https://github.com/rcarmo/ghostty-web) - Patched Ghostty terminal for the web (vendored fork with theme support)
-- [ghostty-web upstream](https://github.com/coder/ghostty-web) - Original Ghostty terminal for the web
-- [pyte](https://github.com/selectel/pyte) - PYTE terminal emulator (used for SVG screenshots)
-- [go-te](https://github.com/rcarmo/go-te) - Go VT terminal emulator used for the in-progress port
+The image sets `WEBTERM_STATIC_PATH=/app/static` and serves assets from `go/webterm/static`.
+The Dockerfile uses a minimal Alpine runtime stage and only installs `ca-certificates` plus `docker-cli`.

@@ -93,3 +93,11 @@ func TestDockerStatsHelperConversions(t *testing.T) {
 		t.Fatalf("max mismatch: %d", got)
 	}
 }
+
+func TestDockerStatsCollectorCanRestart(t *testing.T) {
+	collector := NewDockerStatsCollector("/tmp/does-not-exist.sock", "")
+	collector.Start([]string{"svc"})
+	collector.Stop()
+	collector.Start([]string{"svc"})
+	collector.Stop()
+}

@@ -35,3 +35,12 @@ jobs:
           else
             echo "No Go module found; skipping."
           fi
+
+      - name: Build runtime image (if Dockerfile present)
+        run: |
+          set -e
+          if [ -f Dockerfile ]; then
+            docker build --target runtime --tag webterm:ci .
+          else
+            echo "No Dockerfile found; skipping."
+          fi

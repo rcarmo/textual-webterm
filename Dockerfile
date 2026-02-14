@@ -1,38 +1,24 @@
-# Minimal image for serving a web terminal with Docker watch mode
-#
 # Build: docker build -t webterm .
 # Run:   docker run -v /var/run/docker.sock:/var/run/docker.sock -p 8080:8080 webterm --docker-watch
-#
-FROM python:3.12-slim AS builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    make \
-    && rm -rf /var/lib/apt/lists/*
+FROM golang:1.26-alpine AS builder
 
-# Copy only what's needed for installation
-WORKDIR /build
-COPY pyproject.toml poetry.lock* ./
-COPY README.md ./
-COPY src/ ./src/
-# Install the package
-RUN pip install --no-cache-dir .
+WORKDIR /src
+COPY go/go.mod go/go.sum ./go/
+RUN cd go && go mod download
+COPY go ./go
+RUN cd go && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/webterm ./cmd/webterm
 
-# Final minimal image
-FROM python:3.12-slim
+FROM alpine:3.21 AS runtime
 
-# Install only runtime dependencies (docker CLI for exec commands)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    docker.io \
-    && rm -rf /var/lib/apt/lists/*
+# Keep docker-cli for user-provided webterm-command values like `docker logs` / `docker exec`.
+RUN apk add --no-cache ca-certificates docker-cli
 
-# Copy installed packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin/webterm /usr/local/bin/webterm
+WORKDIR /app
+COPY --from=builder /out/webterm /usr/local/bin/webterm
+COPY go/webterm/static /app/static
 
-# Create non-root user (optional, but may need root for Docker socket access)
-# RUN useradd -m webterm
-# USER webterm
+ENV WEBTERM_STATIC_PATH=/app/static
 
 EXPOSE 8080
 

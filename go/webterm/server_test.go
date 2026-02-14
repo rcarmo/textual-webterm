@@ -214,3 +214,31 @@ func TestRootTerminalPageAndSparklineValidation(t *testing.T) {
 		t.Fatalf("expected 400 for missing container, got %d", resp2.StatusCode)
 	}
 }
+
+func TestMarkRouteActivityBroadcastsWithoutBlockingGlobalLock(t *testing.T) {
+	server := NewLocalServer(Config{}, ServerOptions{})
+	ready := make(chan string, 1)
+	full := make(chan string, 1)
+	full <- "occupied"
+
+	server.mu.Lock()
+	server.sseSubscribers[ready] = struct{}{}
+	server.sseSubscribers[full] = struct{}{}
+	server.routeLastSSE["route-a"] = time.Now().Add(-time.Second)
+	server.mu.Unlock()
+
+	start := time.Now()
+	server.markRouteActivity("route-a")
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("markRouteActivity took too long: %s", elapsed)
+	}
+
+	select {
+	case got := <-ready:
+		if got != "route-a" {
+			t.Fatalf("unexpected broadcast payload: %q", got)
+		}
+	default:
+		t.Fatalf("expected route activity broadcast")
+	}
+}

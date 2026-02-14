@@ -9,10 +9,10 @@
     "typescript": "^5.7.0"
   },
   "scripts": {
-    "build": "bun run typecheck && bun build src/webterm/static/js/terminal.ts --outfile=src/webterm/static/js/terminal.js --minify --target=browser && cp node_modules/ghostty-web/ghostty-vt.wasm src/webterm/static/js/",
-    "build:fast": "bun build src/webterm/static/js/terminal.ts --outfile=src/webterm/static/js/terminal.js --minify --target=browser",
-    "watch": "bun build src/webterm/static/js/terminal.ts --outfile=src/webterm/static/js/terminal.js --watch --target=browser",
+    "build": "bun run typecheck && bun build go/webterm/static/js/terminal.ts --outfile=go/webterm/static/js/terminal.js --minify --target=browser && cp node_modules/ghostty-web/ghostty-vt.wasm go/webterm/static/js/",
+    "build:fast": "bun build go/webterm/static/js/terminal.ts --outfile=go/webterm/static/js/terminal.js --minify --target=browser",
+    "watch": "bun build go/webterm/static/js/terminal.ts --outfile=go/webterm/static/js/terminal.js --watch --target=browser",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json",
-    "copy-wasm": "cp node_modules/ghostty-web/ghostty-vt.wasm src/webterm/static/js/"
+    "copy-wasm": "cp node_modules/ghostty-web/ghostty-vt.wasm go/webterm/static/js/"
   }
 }

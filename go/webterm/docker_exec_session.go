@@ -147,14 +147,7 @@ func (s *DockerExecSession) handleOutput(data []byte) {
 	tracker := s.tracker
 	connector := s.connector
 	s.mu.Unlock()
-	if len(filtered) == 0 {
-		return
-	}
-	s.replay.Add(filtered)
-	if tracker != nil {
-		_ = tracker.Feed(filtered)
-	}
-	connector.OnData(filtered)
+	dispatchSessionOutput(filtered, tracker, s.replay, connector)
 }
 
 func (s *DockerExecSession) createExec() (string, error) {
@@ -317,14 +310,7 @@ func (s *DockerExecSession) GetScreenSnapshot() terminalstate.Snapshot {
 	tracker := s.tracker
 	width, height := s.width, s.height
 	s.mu.RUnlock()
-	if tracker == nil {
-		return terminalstate.Snapshot{
-			Width:  width,
-			Height: height,
-			Buffer: make([][]terminalstate.Cell, height),
-		}
-	}
-	return tracker.Snapshot()
+	return snapshotFromTracker(tracker, width, height)
 }
 
 func (s *DockerExecSession) UpdateConnector(connector SessionConnector) {

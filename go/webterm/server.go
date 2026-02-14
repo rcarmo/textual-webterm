@@ -48,9 +48,14 @@ type screenshotCacheEntry struct {
 type wsClient struct {
 	routeKey string
 	conn     *websocket.Conn
-	send     chan []byte
+	send     chan wsOutbound
 	done     chan struct{}
 	closed   atomic.Bool
+}
+
+type wsOutbound struct {
+	messageType int
+	payload     []byte
 }
 
 type LocalServer struct {
@@ -89,12 +94,12 @@ type localClientConnector struct {
 
 func (c *localClientConnector) OnData(data []byte) {
 	c.server.markRouteActivity(c.routeKey)
-	c.server.enqueueWSData(c.routeKey, data)
+	c.server.enqueueWSFrame(c.routeKey, websocket.BinaryMessage, data)
 }
 
 func (c *localClientConnector) OnBinary(payload []byte) {
 	c.server.markRouteActivity(c.routeKey)
-	c.server.enqueueWSData(c.routeKey, payload)
+	c.server.enqueueWSFrame(c.routeKey, websocket.BinaryMessage, payload)
 }
 
 func (c *localClientConnector) OnMeta(_ map[string]any) {}
@@ -162,9 +167,11 @@ func findStaticPath() string {
 		}
 	}
 	candidates := []string{
-		filepath.Join(".", "src", "webterm", "static"),
-		filepath.Join("..", "src", "webterm", "static"),
-		filepath.Join("..", "..", "src", "webterm", "static"),
+		filepath.Join(".", "webterm", "static"),
+		filepath.Join(".", "go", "webterm", "static"),
+		filepath.Join("..", "webterm", "static"),
+		filepath.Join("..", "go", "webterm", "static"),
+		filepath.Join("..", "..", "webterm", "static"),
 	}
 	for _, candidate := range candidates {
 		if stat, err := os.Stat(candidate); err == nil && stat.IsDir() {
@@ -179,28 +186,37 @@ func (s *LocalServer) markRouteActivity(routeKey string) {
 	s.mu.Lock()
 	s.routeLastActivity[routeKey] = now
 	last := s.routeLastSSE[routeKey]
-	if now.Sub(last) >= 250*time.Millisecond {
-		s.routeLastSSE[routeKey] = now
-		for subscriber := range s.sseSubscribers {
-			select {
-			case subscriber <- routeKey:
-			default:
-			}
-		}
+	if now.Sub(last) < 250*time.Millisecond {
+		s.mu.Unlock()
+		return
+	}
+	s.routeLastSSE[routeKey] = now
+	subscribers := make([]chan string, 0, len(s.sseSubscribers))
+	for subscriber := range s.sseSubscribers {
+		subscribers = append(subscribers, subscriber)
 	}
 	s.mu.Unlock()
+	for _, subscriber := range subscribers {
+		select {
+		case subscriber <- routeKey:
+		default:
+		}
+	}
 }
 
-func (s *LocalServer) enqueueWSData(routeKey string, data []byte) {
+func (s *LocalServer) enqueueWSFrame(routeKey string, messageType int, data []byte) {
 	s.mu.RLock()
 	client := s.wsClients[routeKey]
 	s.mu.RUnlock()
 	if client == nil || client.closed.Load() {
 		return
 	}
-	payload := append([]byte{}, data...)
+	frame := wsOutbound{
+		messageType: messageType,
+		payload:     append([]byte{}, data...),
+	}
 	select {
-	case client.send <- payload:
+	case client.send <- frame:
 	default:
 		// Drop oldest, try again
 		select {
@@ -208,7 +224,7 @@ func (s *LocalServer) enqueueWSData(routeKey string, data []byte) {
 		default:
 		}
 		select {
-		case client.send <- payload:
+		case client.send <- frame:
 		default:
 		}
 	}
@@ -229,14 +245,9 @@ func (s *LocalServer) stopWSClient(routeKey string) {
 
 func (s *LocalServer) wsSender(client *wsClient) {
 	defer close(client.done)
-	for payload := range client.send {
+	for outbound := range client.send {
 		_ = client.conn.SetWriteDeadline(time.Now().Add(wsSendTimeout))
-		// Detect JSON messages (start with '[') vs binary terminal data
-		msgType := websocket.BinaryMessage
-		if len(payload) > 0 && payload[0] == '[' {
-			msgType = websocket.TextMessage
-		}
-		if err := client.conn.WriteMessage(msgType, payload); err != nil {
+		if err := client.conn.WriteMessage(outbound.messageType, outbound.payload); err != nil {
 			return
 		}
 	}
@@ -304,7 +315,7 @@ func (s *LocalServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	client := &wsClient{
 		routeKey: routeKey,
 		conn:     conn,
-		send:     make(chan []byte, wsSendQueueMax),
+		send:     make(chan wsOutbound, wsSendQueueMax),
 		done:     make(chan struct{}),
 	}
 	s.mu.Lock()
@@ -319,8 +330,12 @@ func (s *LocalServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil || client.closed.Load() {
 			return
 		}
+		frame := wsOutbound{
+			messageType: websocket.TextMessage,
+			payload:     data,
+		}
 		select {
-		case client.send <- data:
+		case client.send <- frame:
 		default:
 		}
 	}
@@ -333,7 +348,7 @@ func (s *LocalServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			sessionCreated = true
 			replay := daResponsePattern.ReplaceAll(session.GetReplayBuffer(), nil)
 			if len(replay) > 0 {
-				s.enqueueWSData(routeKey, replay)
+				s.enqueueWSFrame(routeKey, websocket.BinaryMessage, replay)
 			}
 		} else {
 			s.sessionManager.OnSessionEnd(sessionID)
@@ -445,9 +460,18 @@ func (s *LocalServer) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	if !ok && routeKey != "" {
 		if _, exists := s.sessionManager.AppBySlug(routeKey); exists {
 			_ = s.createTerminalSession(routeKey, DefaultTerminalWidth, DefaultTerminalHeight)
-			time.Sleep(500 * time.Millisecond)
-			session = s.sessionManager.GetSessionByRouteKey(routeKey)
-			ok = session != nil
+			deadline := time.Now().Add(500 * time.Millisecond)
+			for {
+				session = s.sessionManager.GetSessionByRouteKey(routeKey)
+				if session != nil {
+					ok = true
+					break
+				}
+				if time.Now().After(deadline) {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
 		}
 	}
 	if !ok || session == nil {
@@ -555,7 +579,6 @@ func (s *LocalServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.sseSubscribers, channel)
-		close(channel)
 		s.mu.Unlock()
 	}()
 

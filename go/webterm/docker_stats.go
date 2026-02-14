@@ -67,6 +67,8 @@ func (d *DockerStatsCollector) Start(serviceNames []string) {
 		d.mu.Unlock()
 		return
 	}
+	d.stopCh = make(chan struct{})
+	d.doneCh = make(chan struct{})
 	d.serviceList = append([]string{}, serviceNames...)
 	d.running = true
 	d.mu.Unlock()

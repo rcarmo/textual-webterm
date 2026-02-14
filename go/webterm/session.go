@@ -32,3 +32,28 @@ func (noopConnector) OnData([]byte)         {}
 func (noopConnector) OnBinary([]byte)       {}
 func (noopConnector) OnMeta(map[string]any) {}
 func (noopConnector) OnClose()              {}
+
+func dispatchSessionOutput(filtered []byte, tracker *terminalstate.Tracker, replay *ReplayBuffer, connector SessionConnector) {
+	if len(filtered) == 0 {
+		return
+	}
+	replay.Add(filtered)
+	if tracker != nil {
+		_ = tracker.Feed(filtered)
+	}
+	connector.OnData(filtered)
+}
+
+func snapshotFromTracker(tracker *terminalstate.Tracker, width, height int) terminalstate.Snapshot {
+	if tracker != nil {
+		return tracker.Snapshot()
+	}
+	if height < 0 {
+		height = 0
+	}
+	return terminalstate.Snapshot{
+		Width:  width,
+		Height: height,
+		Buffer: make([][]terminalstate.Cell, height),
+	}
+}
