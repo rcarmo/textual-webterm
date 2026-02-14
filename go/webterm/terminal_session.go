@@ -10,7 +10,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/google/shlex"
-	"github.com/rcarmo/webterm-go-port/terminalstate"
+	"github.com/rcarmo/webterm-go-port/internal/terminalstate"
 )
 
 type TerminalSession struct {

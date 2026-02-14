@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rcarmo/webterm-go-port/terminalstate"
+	"github.com/rcarmo/webterm-go-port/internal/terminalstate"
 )
 
 func newUnixHTTPTestServer(t *testing.T, handler http.Handler) (string, func()) {

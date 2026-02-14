@@ -5,7 +5,7 @@ import (
 	"html"
 	"strings"
 
-	"github.com/rcarmo/webterm-go-port/terminalstate"
+	"github.com/rcarmo/webterm-go-port/internal/terminalstate"
 )
 
 var ansiColors = map[string]string{
