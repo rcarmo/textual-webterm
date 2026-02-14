@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Prefer Makefile targets; this is intentionally generic.
+      - name: Run checks
+        run: |
+          set -e
+          if make -n check >/dev/null 2>&1; then
+            make check
+          elif make -n lint >/dev/null 2>&1 && make -n test >/dev/null 2>&1; then
+            make lint && make test
+          else
+            echo "No Makefile check/lint/test targets found; skipping."
+          fi
+
+      - name: Run Go tests (if present)
+        run: |
+          set -e
+          if [ -f go/go.mod ]; then
+            (cd go && go test ./...)
+          elif [ -f go.mod ]; then
+            go test ./...
+          else
+            echo "No Go module found; skipping."
+          fi
