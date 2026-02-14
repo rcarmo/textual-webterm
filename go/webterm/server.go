@@ -2,6 +2,7 @@ package webterm
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/sha1"
 	"encoding/json"
@@ -67,6 +68,11 @@ type loggingResponseWriter struct {
 	bytes  int
 }
 
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	writer *gzip.Writer
+}
+
 func (w *loggingResponseWriter) WriteHeader(statusCode int) {
 	w.status = statusCode
 	w.ResponseWriter.WriteHeader(statusCode)
@@ -108,6 +114,41 @@ func (w *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func (w *loggingResponseWriter) Push(target string, opts *http.PushOptions) error {
+	if pusher, ok := w.ResponseWriter.(http.Pusher); ok {
+		return pusher.Push(target, opts)
+	}
+	return http.ErrNotSupported
+}
+
+func (w *gzipResponseWriter) WriteHeader(statusCode int) {
+	w.Header().Del("Content-Length")
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Add("Vary", "Accept-Encoding")
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *gzipResponseWriter) Write(payload []byte) (int, error) {
+	if w.Header().Get("Content-Encoding") == "" {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.writer.Write(payload)
+}
+
+func (w *gzipResponseWriter) ReadFrom(r io.Reader) (int64, error) {
+	if w.Header().Get("Content-Encoding") == "" {
+		w.WriteHeader(http.StatusOK)
+	}
+	return io.Copy(w.writer, r)
+}
+
+func (w *gzipResponseWriter) Flush() {
+	_ = w.writer.Flush()
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *gzipResponseWriter) Push(target string, opts *http.PushOptions) error {
 	if pusher, ok := w.ResponseWriter.(http.Pusher); ok {
 		return pusher.Push(target, opts)
 	}
@@ -366,6 +407,26 @@ func (s *LocalServer) loggingMiddleware(next http.Handler) http.Handler {
 			status = http.StatusOK
 		}
 		log.Printf("%s %s status=%d bytes=%d duration=%s remote=%s", r.Method, r.URL.RequestURI(), status, lw.bytes, time.Since(start), r.RemoteAddr)
+	})
+}
+
+func (s *LocalServer) gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		defer func() { _ = gz.Close() }()
+		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, writer: gz}, r)
 	})
 }
 
@@ -755,7 +816,378 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		if s.dockerWatch {
 			dockerWatchJS = "true"
 		}
-		html := fmt.Sprintf(`<!DOCTYPE html><html><head><title>Session Dashboard</title><link rel="manifest" href="/static/manifest.json"><meta name="theme-color" content="#0d1117"><link rel="icon" href="/static/icons/webterm-192.png" sizes="192x192"><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;margin:16px;background:#0f172a;color:#e2e8f0}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}.tile{background:#1e293b;border:1px solid #334155;border-radius:8px;overflow:hidden;cursor:pointer}.tile-header{padding:10px 12px;font-weight:bold;border-bottom:1px solid #334155;display:flex;justify-content:space-between}.thumb{width:100%%;height:180px;object-fit:contain;background:#0b1220;display:block}.meta{padding:8px 12px;color:#94a3b8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{color:#64748b;text-align:center;padding:40px}</style></head><body><h1>Sessions</h1><div id="subtitle"></div><div class="grid" id="grid"></div><script>let tiles=%s;const composeMode=%s;const dockerWatchMode=%s;let cardsBySlug={};const grid=document.getElementById("grid");const subtitle=document.getElementById("subtitle");function openTile(tile){const url='/?route_key='+encodeURIComponent(tile.slug);const target='webterm-'+tile.slug;let win=window.open(url,target);if(!win){window.location.href=url;return}if(typeof win.focus==='function'){win.focus()}}function makeTile(tile){const card=document.createElement('div');card.className='tile';const header=document.createElement('div');header.className='tile-header';header.innerHTML='<span>'+tile.name+'</span>';if(composeMode){const spark=document.createElement('img');spark.width=80;spark.height=16;spark.alt='CPU';header.appendChild(spark);card.sparkline=spark}const img=document.createElement('img');img.className='thumb';img.alt=tile.name;const meta=document.createElement('div');meta.className='meta';meta.textContent=tile.command||'';const body=document.createElement('div');body.appendChild(img);card.appendChild(header);card.appendChild(body);card.appendChild(meta);card.onclick=()=>openTile(tile);card.img=img;return card}function refreshTile(slug){const card=cardsBySlug[slug];if(card){card.img.src='/screenshot.svg?route_key='+encodeURIComponent(slug)+'&_t='+Date.now()}}function refreshSparklines(){if(!composeMode)return;tiles.forEach(tile=>{const card=cardsBySlug[tile.slug];if(card&&card.sparkline){card.sparkline.src='/cpu-sparkline.svg?container='+encodeURIComponent(tile.slug)+'&width=80&height=16&_t='+Date.now()}})}async function refreshTiles(){try{const resp=await fetch('/tiles');const next=await resp.json();const oldSlugs=tiles.map(t=>t.slug).sort().join(',');const newSlugs=next.map(t=>t.slug).sort().join(',');if(oldSlugs!==newSlugs){tiles=next;render()}}catch(_){}}function render(){grid.innerHTML='';cardsBySlug={};if(!tiles.length){grid.innerHTML='<div class="empty">No containers found. Start containers with the webterm-command label.</div>';subtitle.textContent=dockerWatchMode?'Watching for containers with webterm-command label...':'';return}subtitle.textContent='';if(dockerWatchMode){console.log(tiles.length+' container(s) found')};tiles.forEach(tile=>{const card=makeTile(tile);card.img.src='/screenshot.svg?route_key='+encodeURIComponent(tile.slug);grid.appendChild(card);cardsBySlug[tile.slug]=card});refreshSparklines()}let source=null;function startSSE(){if(source)return;source=new EventSource('/events');source.addEventListener('activity',(e)=>{if(e.data==='__dashboard__'){refreshTiles()}else{refreshTile(e.data)}});source.onerror=()=>{source.close();source=null;setTimeout(startSSE,2000)}}render();if(!document.hidden)startSSE();document.addEventListener('visibilitychange',()=>{if(document.hidden){if(source){source.close();source=null}}else startSSE()});if(composeMode){refreshSparklines();setInterval(refreshSparklines,30000)}</script></body></html>`, string(tilesJSON), composeModeJS, dockerWatchJS)
+		html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+	<title>Session Dashboard</title>
+	<link rel="manifest" href="/static/manifest.json">
+	<meta name="theme-color" content="#0d1117">
+	<link rel="icon" href="/static/icons/webterm-192.png" sizes="192x192">
+	<style>
+		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 16px; background: #0f172a; color: #e2e8f0; }
+		h1 { margin-bottom: 8px; }
+		.subtitle { color: #64748b; font-size: 14px; margin-bottom: 16px; }
+		.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+		.tile { background: #1e293b; border: 1px solid #334155; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.4); cursor: pointer; transition: border-color 0.15s; }
+		.tile:hover { border-color: #475569; }
+		.tile.selected { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.3); }
+		.tile-header { padding: 10px 12px; font-weight: bold; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; }
+		.tile-title { display: flex; align-items: center; gap: 8px; }
+		.sparkline { opacity: 0.9; }
+		.tile-body { padding: 0; }
+		.thumb { width: 100%%; height: 180px; object-fit: contain; background: #0b1220; display: block; }
+		.meta { padding: 8px 12px; color: #94a3b8; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+		.empty { color: #64748b; text-align: center; padding: 40px; }
+		.floating-results { position: fixed; top: 50%%; left: 50%%; transform: translate(-50%%, -50%%); width: 400px; max-width: 90vw; max-height: 70vh; overflow-y: auto; background: #1e293b; border: 1px solid #475569; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); padding: 16px; z-index: 1000; }
+		.floating-results.hidden { display: none; }
+		.floating-results .search-header { margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 8px; }
+		.floating-results .search-query { font-size: 18px; font-weight: bold; color: #3b82f6; }
+		.floating-results .result-item { display: flex; align-items: center; gap: 12px; padding: 12px; margin: 6px 0; border: 1px solid #334155; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+		.floating-results .result-item:hover, .floating-results .result-item.active { background: #334155; border-color: #3b82f6; }
+		.floating-results .result-thumb { width: 96px; height: 72px; flex: 0 0 auto; border-radius: 4px; border: 1px solid #334155; background: #0b1220; object-fit: contain; }
+		.floating-results .result-content { display: flex; flex-direction: column; gap: 2px; }
+		.floating-results .result-title { font-weight: bold; margin-bottom: 4px; }
+		.floating-results .result-meta { font-size: 12px; color: #94a3b8; }
+		.floating-results .no-results { color: #64748b; text-align: center; padding: 20px; }
+		.key-indicator { position: fixed; bottom: 16px; left: 16px; display: flex; gap: 4px; z-index: 1000; }
+		.key-box { display: inline-flex; align-items: center; justify-content: center; background: #334155; color: #e2e8f0; font-size: 12px; font-weight: bold; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); opacity: 1; transition: opacity 0.3s; }
+		.key-box.square { width: 28px; height: 28px; }
+		.key-box.rectangle { padding: 4px 8px; }
+		.key-box.fade-out { opacity: 0; }
+		.help-hint { position: fixed; bottom: 16px; right: 16px; color: #64748b; font-size: 12px; }
+	</style>
+</head>
+<body>
+	<h1>Sessions</h1>
+	<div class="subtitle" id="subtitle"></div>
+	<div class="grid" id="grid"></div>
+	<div class="floating-results hidden" id="floating-results"></div>
+	<div class="key-indicator" id="key-indicator"></div>
+	<div class="help-hint">Type to search • ↑↓ to navigate • Enter to open • Esc to clear</div>
+	<script>
+		let tiles = %s;
+		const composeMode = %s;
+		const dockerWatchMode = %s;
+		let cardsBySlug = {};
+
+		let searchQuery = '';
+		let activeResultIndex = -1;
+		let filteredResults = [];
+		const floatingResultsEl = document.getElementById('floating-results');
+		const keyIndicatorEl = document.getElementById('key-indicator');
+		const thumbnailCache = {};
+		const THUMBNAIL_TTL_MS = 5000;
+		const grid = document.getElementById('grid');
+		const subtitle = document.getElementById('subtitle');
+
+		function makeTile(tile) {
+			const card = document.createElement('div');
+			card.className = 'tile';
+			const header = document.createElement('div');
+			header.className = 'tile-header';
+			const titleSpan = document.createElement('div');
+			titleSpan.className = 'tile-title';
+			titleSpan.innerHTML = '<span>' + tile.name + '</span>';
+			header.appendChild(titleSpan);
+			if (composeMode) {
+				const sparkline = document.createElement('img');
+				sparkline.className = 'sparkline';
+				sparkline.width = 80;
+				sparkline.height = 16;
+				sparkline.alt = 'CPU';
+				header.appendChild(sparkline);
+				card.sparkline = sparkline;
+			}
+			const body = document.createElement('div');
+			body.className = 'tile-body';
+			const img = document.createElement('img');
+			img.className = 'thumb';
+			img.alt = tile.name;
+			const meta = document.createElement('div');
+			meta.className = 'meta';
+			meta.textContent = tile.command || '';
+			meta.title = tile.command || '';
+			body.appendChild(img);
+			card.appendChild(header);
+			card.appendChild(body);
+			card.appendChild(meta);
+			card.onclick = () => openTile(tile);
+			card.img = img;
+			return card;
+		}
+
+		function normalizeText(value) {
+			return (value || '').toString().toLowerCase();
+		}
+
+		function getTileTitle(tile) {
+			return tile.name || tile.slug || 'Unknown';
+		}
+
+		function getTileCommand(tile) {
+			return tile.command || '';
+		}
+
+		function getThumbnailSrc(tile) {
+			const slug = tile.slug || '';
+			if (!slug) return '';
+			const now = Date.now();
+			const existing = thumbnailCache[slug];
+			if (!existing || (now - existing.updatedAt) > THUMBNAIL_TTL_MS) {
+				const src = '/screenshot.svg?route_key=' + encodeURIComponent(slug) + '&_t=' + now;
+				thumbnailCache[slug] = { src, updatedAt: now };
+				return src;
+			}
+			return existing.src;
+		}
+
+		function updateTileSelection() {
+			Object.values(cardsBySlug).forEach((c) => c.classList.remove('selected'));
+			if (filteredResults.length > 0 && activeResultIndex >= 0) {
+				const selected = filteredResults[activeResultIndex];
+				if (selected && selected.slug) {
+					const card = cardsBySlug[selected.slug];
+					if (card) card.classList.add('selected');
+				}
+			}
+		}
+
+		function renderFloatingResults() {
+			floatingResultsEl.innerHTML = '';
+			if (searchQuery === '') {
+				floatingResultsEl.classList.add('hidden');
+				activeResultIndex = -1;
+				filteredResults = [];
+				updateTileSelection();
+				return;
+			}
+
+			const query = normalizeText(searchQuery);
+			filteredResults = tiles.filter((t) => {
+				if (!t) return false;
+				const name = normalizeText(t.name);
+				const command = normalizeText(t.command);
+				const slug = normalizeText(t.slug);
+				return name.includes(query) || command.includes(query) || slug.includes(query);
+			});
+
+			const header = document.createElement('div');
+			header.className = 'search-header';
+			header.innerHTML = '<span>Search:</span><span class="search-query">' + searchQuery + '</span>';
+			floatingResultsEl.appendChild(header);
+
+			if (filteredResults.length === 0) {
+				const noResults = document.createElement('div');
+				noResults.className = 'no-results';
+				noResults.textContent = 'No matches found';
+				floatingResultsEl.appendChild(noResults);
+			} else {
+				if (activeResultIndex < 0 || activeResultIndex >= filteredResults.length) {
+					activeResultIndex = 0;
+				}
+				filteredResults.forEach((tile, index) => {
+					const item = document.createElement('div');
+					item.className = 'result-item' + (index === activeResultIndex ? ' active' : '');
+					const thumb = document.createElement('img');
+					thumb.className = 'result-thumb';
+					const title = getTileTitle(tile);
+					const command = getTileCommand(tile);
+					const thumbSrc = getThumbnailSrc(tile);
+					thumb.alt = title;
+					if (thumbSrc) {
+						thumb.src = thumbSrc;
+					} else {
+						thumb.style.display = 'none';
+					}
+					const content = document.createElement('div');
+					content.className = 'result-content';
+					content.innerHTML = '<div class="result-title">' + title + '</div><div class="result-meta">' + command + '</div>';
+					item.appendChild(thumb);
+					item.appendChild(content);
+					item.onclick = () => openTile(tile);
+					floatingResultsEl.appendChild(item);
+				});
+			}
+
+			floatingResultsEl.classList.remove('hidden');
+			updateTileSelection();
+		}
+
+		function showKeyIndicator(key) {
+			const arrowKeyMap = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' };
+			const keyDisplay = arrowKeyMap[key] || key;
+			const keyBox = document.createElement('div');
+			keyBox.className = 'key-box ' + (key.length > 1 ? 'rectangle' : 'square');
+			keyBox.textContent = keyDisplay;
+			keyIndicatorEl.appendChild(keyBox);
+			setTimeout(() => {
+				keyBox.classList.add('fade-out');
+				setTimeout(() => keyBox.remove(), 300);
+			}, 1500);
+		}
+
+		function openTile(tile) {
+			if (!tile || !tile.slug) return;
+			const url = '/?route_key=' + encodeURIComponent(tile.slug);
+			const target = 'webterm-' + tile.slug;
+			let win = window.open(url, target);
+			if (!win) {
+				window.location.href = url;
+				return;
+			}
+			if (win.closed) {
+				win = window.open(url, target);
+			}
+			if (win && typeof win.focus === 'function') {
+				win.focus();
+			}
+			searchQuery = '';
+			activeResultIndex = -1;
+			renderFloatingResults();
+		}
+
+		function handleKeydown(event) {
+			if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+			showKeyIndicator(event.key);
+
+			if (event.key === 'Escape') {
+				searchQuery = '';
+				activeResultIndex = -1;
+				renderFloatingResults();
+				return;
+			}
+			if (event.key === 'Backspace') {
+				searchQuery = searchQuery.slice(0, -1);
+				renderFloatingResults();
+				return;
+			}
+			if (event.key === 'ArrowUp') {
+				event.preventDefault();
+				if (filteredResults.length > 0) {
+					activeResultIndex = (activeResultIndex - 1 + filteredResults.length) %% filteredResults.length;
+					renderFloatingResults();
+				}
+				return;
+			}
+			if (event.key === 'ArrowDown') {
+				event.preventDefault();
+				if (filteredResults.length > 0) {
+					activeResultIndex = (activeResultIndex + 1) %% filteredResults.length;
+					renderFloatingResults();
+				}
+				return;
+			}
+			if (event.key === 'Enter') {
+				if (filteredResults.length > 0 && activeResultIndex >= 0) {
+					openTile(filteredResults[activeResultIndex]);
+				} else if (filteredResults.length === 1) {
+					openTile(filteredResults[0]);
+				}
+				return;
+			}
+			if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+				searchQuery += event.key.toLowerCase();
+				renderFloatingResults();
+			}
+		}
+
+		document.addEventListener('keydown', handleKeydown);
+
+		function refreshTile(slug) {
+			const card = cardsBySlug[slug];
+			if (!card) return;
+			card.img.src = '/screenshot.svg?route_key=' + encodeURIComponent(slug) + '&_t=' + Date.now();
+		}
+
+		function refreshAll() {
+			for (const tile of tiles) {
+				const card = cardsBySlug[tile.slug];
+				if (card) card.img.src = '/screenshot.svg?route_key=' + encodeURIComponent(tile.slug);
+			}
+		}
+
+		async function refreshTilesList() {
+			try {
+				const resp = await fetch('/tiles');
+				const newTiles = await resp.json();
+				const oldSlugs = tiles.map((t) => t.slug).sort().join(',');
+				const newSlugs = newTiles.map((t) => t.slug).sort().join(',');
+				if (oldSlugs !== newSlugs) {
+					tiles = newTiles;
+					renderTiles();
+				}
+			} catch (_) {}
+		}
+
+		function refreshSparklines() {
+			if (!composeMode) return;
+			for (const tile of tiles) {
+				const card = cardsBySlug[tile.slug];
+				if (card && card.sparkline) {
+					card.sparkline.src = '/cpu-sparkline.svg?container=' + encodeURIComponent(tile.slug) + '&width=80&height=16&_t=' + Date.now();
+				}
+			}
+		}
+
+		function renderTiles() {
+			grid.innerHTML = '';
+			cardsBySlug = {};
+			if (tiles.length === 0) {
+				grid.innerHTML = '<div class="empty">No containers found. Start containers with the webterm-command label.</div>';
+				subtitle.textContent = dockerWatchMode ? 'Watching for containers with webterm-command label...' : '';
+				return;
+			}
+			subtitle.textContent = '';
+			if (dockerWatchMode) {
+				console.log(tiles.length + ' container(s) found');
+			}
+			for (const tile of tiles) {
+				const card = makeTile(tile);
+				grid.appendChild(card);
+				cardsBySlug[tile.slug] = card;
+			}
+			refreshAll();
+			renderFloatingResults();
+			refreshSparklines();
+		}
+
+		let source = null;
+		function startSSE() {
+			if (source) return;
+			source = new EventSource('/events');
+			source.addEventListener('activity', (e) => {
+				if (e.data === '__dashboard__') {
+					refreshTilesList();
+				} else {
+					refreshTile(e.data);
+				}
+			});
+			source.onerror = () => {
+				source.close();
+				source = null;
+				setTimeout(startSSE, 2000);
+			};
+		}
+
+		renderTiles();
+		if (!document.hidden) startSSE();
+		document.addEventListener('visibilitychange', () => {
+			if (document.hidden) {
+				if (source) {
+					source.close();
+					source = null;
+				}
+			} else {
+				startSSE();
+			}
+		});
+		if (composeMode) {
+			refreshSparklines();
+			setInterval(refreshSparklines, 30000);
+		}
+	</script>
+</body>
+</html>`, string(tilesJSON), composeModeJS, dockerWatchJS)
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = io.WriteString(w, html)
 		return
@@ -897,7 +1329,7 @@ func (s *LocalServer) Handler() http.Handler {
 	if strings.TrimSpace(s.staticPath) != "" {
 		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.staticPath))))
 	}
-	return s.loggingMiddleware(mux)
+	return s.loggingMiddleware(s.gzipMiddleware(mux))
 }
 
 func (s *LocalServer) Run(ctx context.Context) error {

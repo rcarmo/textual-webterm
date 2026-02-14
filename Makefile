@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format test race coverage check fuzz build-go build build-fast bundle bundle-watch bundle-clean clean clean-all build-all typecheck bump-patch
+.PHONY: help install install-dev lint format test race coverage check fuzz build-go build build-fast bundle bundle-watch bundle-clean clean clean-all build-all typecheck bump-patch push
 
 GO_DIR = go
 STATIC_JS_DIR = go/webterm/static/js
@@ -83,3 +83,20 @@ bump-patch: ## Bump patch version in VERSION and create git tag
 	git commit -m "Bump version to $$NEW"; \
 	git tag "v$$NEW"; \
 	echo "Bumped version: $$OLD -> $$NEW (tagged v$$NEW)"
+
+push: ## Push current branch and tags pointing at HEAD
+	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$BRANCH" = "HEAD" ]; then \
+		echo "Detached HEAD; refusing to push"; \
+		exit 1; \
+	fi; \
+	git push origin "$$BRANCH"; \
+	TAGS=$$(git tag --points-at HEAD); \
+	if [ -n "$$TAGS" ]; then \
+		for TAG in $$TAGS; do \
+			echo "Pushing tag $$TAG"; \
+			git push origin "$$TAG"; \
+		done; \
+	else \
+		echo "No tags on current commit"; \
+	fi
