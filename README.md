@@ -34,7 +34,7 @@ Coupled with [`agentbox`](https://github.com/rcarmo/agentbox), you can use it to
 
 ## Known Issues
 
-- `pyte` (the library used to capture the underlying terminal state for screenshots) does not implement some standard escape sequences, resulting in occasionally mis-rendered screenshots. We monkeypatch pyte at runtime to add missing support (CSI S/T scroll, alternate screen buffers, etc.) — see [docs/pyte-patches.md](docs/pyte-patches.md) for details. I'm waiting for `libghostty-vt` to be finished to port this whole thing to Go (or even plain C) and have full fidelity.
+- `pyte` (the library used to capture the underlying terminal state for screenshots) does not implement some standard escape sequences, resulting in occasionally mis-rendered screenshots. We monkeypatch pyte at runtime to add missing support (CSI S/T scroll, alternate screen buffers, etc.) — see [docs/pyte-patches.md](docs/pyte-patches.md) for details.
 
 ## Installation
 
@@ -268,6 +268,7 @@ make bundle-watch
 - WebSocket protocol (browser ↔ server) is JSON: `["stdin", data]`, `["resize", {"width": w, "height": h}]`, `["ping", data]`.
 - Frontend source is in `src/webterm/static/js/terminal.ts`.
 - Screenshots use [pyte](https://github.com/selectel/pyte) for ANSI interpretation and custom SVG rendering. `AltScreen` adds alternate screen buffer support, [CSI S/T scroll handling, and Ink partial clear expansion](docs/pyte-patches.md).
+- Go runtime port is in `go/webterm` (entrypoint: `go/cmd/webterm`), using [go-te](https://github.com/rcarmo/go-te) for terminal state and screenshots.
 - CPU stats are read directly from Docker socket using asyncio (no additional dependencies).
 
 ## Requirements
@@ -285,3 +286,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 - [ghostty-web](https://github.com/rcarmo/ghostty-web) - Patched Ghostty terminal for the web (vendored fork with theme support)
 - [ghostty-web upstream](https://github.com/coder/ghostty-web) - Original Ghostty terminal for the web
 - [pyte](https://github.com/selectel/pyte) - PYTE terminal emulator (used for SVG screenshots)
+- [go-te](https://github.com/rcarmo/go-te) - Go VT terminal emulator used for the in-progress port
