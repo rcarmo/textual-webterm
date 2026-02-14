@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -111,6 +112,7 @@ func (w *DockerWatcher) addContainer(container map[string]any) {
 	w.mu.Unlock()
 
 	w.sessionManager.AddApp(name, command, slug, true, theme)
+	log.Printf("docker event: added container id=%s slug=%s name=%s", containerID, slug, name)
 	if w.onContainerAdded != nil {
 		w.onContainerAdded(slug, name, command)
 	}
@@ -135,6 +137,7 @@ func (w *DockerWatcher) removeContainer(containerID string) {
 		w.sessionManager.CloseSession(sessionID)
 	}
 	w.sessionManager.RemoveApp(slug)
+	log.Printf("docker event: removed container id=%s slug=%s", containerID, slug)
 	if w.onContainerRemoved != nil {
 		w.onContainerRemoved(slug)
 	}
@@ -174,13 +177,16 @@ func (w *DockerWatcher) handleEvent(event map[string]any) {
 	}
 	switch action {
 	case "start":
+		log.Printf("docker event: action=start container=%s", containerID)
 		path := fmt.Sprintf("/containers/%s/json", url.PathEscape(containerID))
 		status, body, err := unixJSONRequest(w.socketPath, http.MethodGet, path, nil)
 		if err != nil || status != http.StatusOK {
+			log.Printf("docker event: start inspect failed container=%s status=%d err=%v", containerID, status, err)
 			return
 		}
 		var detail map[string]any
 		if err := json.Unmarshal(body, &detail); err != nil {
+			log.Printf("docker event: start decode failed container=%s err=%v", containerID, err)
 			return
 		}
 		config := toAnyMap(detail["Config"])
@@ -195,6 +201,7 @@ func (w *DockerWatcher) handleEvent(event map[string]any) {
 		}
 		w.addContainer(container)
 	case "die":
+		log.Printf("docker event: action=die container=%s", containerID)
 		w.removeContainer(containerID)
 	}
 }
@@ -212,6 +219,7 @@ func (w *DockerWatcher) watchEvents(ctx context.Context, waitDone chan struct{})
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 		resp, err := w.httpClient.Do(req)
 		if err != nil {
+			log.Printf("docker event stream connect failed err=%v", err)
 			select {
 			case <-ctx.Done():
 				return
@@ -219,10 +227,12 @@ func (w *DockerWatcher) watchEvents(ctx context.Context, waitDone chan struct{})
 				continue
 			}
 		}
+		log.Printf("docker event stream connected")
 		decoder := json.NewDecoder(resp.Body)
 		for {
 			var event map[string]any
 			if err := decoder.Decode(&event); err != nil {
+				log.Printf("docker event stream decode error err=%v", err)
 				break
 			}
 			w.handleEvent(event)
@@ -239,8 +249,10 @@ func (w *DockerWatcher) watchEvents(ctx context.Context, waitDone chan struct{})
 func (w *DockerWatcher) ScanExisting() {
 	containers, err := w.listLabeledContainers()
 	if err != nil {
+		log.Printf("docker scan failed err=%v", err)
 		return
 	}
+	log.Printf("docker scan found %d labeled container(s)", len(containers))
 	for _, container := range containers {
 		w.addContainer(container)
 	}
@@ -258,6 +270,7 @@ func (w *DockerWatcher) Start() {
 	w.waitDone = waitDone
 	w.running = true
 	w.mu.Unlock()
+	log.Printf("docker watcher started")
 	w.ScanExisting()
 	go w.watchEvents(ctx, waitDone)
 }
@@ -276,4 +289,5 @@ func (w *DockerWatcher) Stop() {
 		cancel()
 	}
 	<-waitDone
+	log.Printf("docker watcher stopped")
 }
