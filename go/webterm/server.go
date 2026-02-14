@@ -819,6 +819,7 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
+	<meta charset="utf-8">
 	<title>Session Dashboard</title>
 	<link rel="manifest" href="/static/manifest.json">
 	<meta name="theme-color" content="#0d1117">
@@ -876,6 +877,7 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		const floatingResultsEl = document.getElementById('floating-results');
 		const keyIndicatorEl = document.getElementById('key-indicator');
 		const thumbnailCache = {};
+		const activeObjectURLBySlug = {};
 		const refreshQueue = [];
 		const queuedRefresh = {};
 		let screenshotRequestInFlight = false;
@@ -1119,27 +1121,32 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 			}
 			screenshotRequestInFlight = true;
 			const img = card.img;
-			let released = false;
-			const release = () => {
-				if (released) return;
-				released = true;
-				screenshotRequestInFlight = false;
-				thumbnailCache[slug] = { src: img.currentSrc || img.src, updatedAt: Date.now() };
-				setTimeout(processRefreshQueue, 0);
-			};
-			const timeout = setTimeout(release, 5000);
-			const complete = () => {
-				clearTimeout(timeout);
-				img.removeEventListener('load', complete);
-				img.removeEventListener('error', complete);
-				release();
-			};
-			img.addEventListener('load', complete);
-			img.addEventListener('error', complete);
-			img.src = '/screenshot.svg?route_key=' + encodeURIComponent(slug);
-			if (typeof img.decode === 'function') {
-				img.decode().then(complete).catch(() => {});
-			}
+			const url = '/screenshot.svg?route_key=' + encodeURIComponent(slug);
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 5000);
+			fetch(url, { cache: 'no-cache', signal: controller.signal })
+				.then((resp) => {
+					if (resp.status === 304) return null;
+					if (!resp.ok) throw new Error('screenshot fetch failed');
+					return resp.blob();
+				})
+				.then((blob) => {
+					if (!blob) return;
+					const previous = activeObjectURLBySlug[slug];
+					const objectURL = URL.createObjectURL(blob);
+					activeObjectURLBySlug[slug] = objectURL;
+					img.src = objectURL;
+					thumbnailCache[slug] = { src: objectURL, updatedAt: Date.now() };
+					if (previous) {
+						URL.revokeObjectURL(previous);
+					}
+				})
+				.catch(() => {})
+				.finally(() => {
+					clearTimeout(timeout);
+					screenshotRequestInFlight = false;
+					setTimeout(processRefreshQueue, 0);
+				});
 		}
 
 		function queueTileRefresh(slug) {
@@ -1207,8 +1214,13 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 			grid.innerHTML = '';
 			cardsBySlug = {};
 			refreshQueue.length = 0;
+			screenshotRequestInFlight = false;
 			for (const key in queuedRefresh) {
 				delete queuedRefresh[key];
+			}
+			for (const key in activeObjectURLBySlug) {
+				URL.revokeObjectURL(activeObjectURLBySlug[key]);
+				delete activeObjectURLBySlug[key];
 			}
 			if (tiles.length === 0) {
 				grid.innerHTML = '<div class="empty">No containers found. Start containers with the webterm-command label.</div>';
@@ -1266,7 +1278,7 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	</script>
 </body>
 </html>`, string(tilesJSON), composeModeJS, dockerWatchJS)
-		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = io.WriteString(w, html)
 		return
 	}
@@ -1280,8 +1292,8 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		app, ok = s.sessionManager.GetDefaultApp()
 	}
 	if !ok {
-		w.Header().Set("Content-Type", "text/html")
-		_, _ = io.WriteString(w, "<!DOCTYPE html><html><head><title>Webterm Server</title></head><body><h2>No Apps Available</h2><p>No terminal applications are configured.</p></body></html>")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Webterm Server</title></head><body><h2>No Apps Available</h2><p>No terminal applications are configured.</p></body></html>")
 		return
 	}
 
@@ -1308,8 +1320,8 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	escapedFont := strings.ReplaceAll(fontFamily, `"`, "&quot;")
 	dataAttrs := fmt.Sprintf(`data-session-websocket-url="%s" data-font-size="%d" data-scrollback="1000" data-theme="%s" data-font-family="%s"`, htmlAttrEscape(wsURL), s.fontSize, htmlAttrEscape(theme), escapedFont)
-	page := fmt.Sprintf(`<!DOCTYPE html><html><head><title>%s</title><link rel="stylesheet" href="/static/monospace.css"><style>html,body{width:100%%;height:100%%}body{background:%s;margin:0;padding:0;overflow:hidden;font-family:var(--webterm-mono)}.webterm-terminal{width:100%%;height:100%%;display:block;overflow:hidden}</style></head><body><div id="terminal" class="webterm-terminal" %s></div><script type="module" src="/static/js/terminal.js"></script></body></html>`, htmlEscape(app.Name), themeBG, dataAttrs)
-	w.Header().Set("Content-Type", "text/html")
+	page := fmt.Sprintf(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>%s</title><link rel="stylesheet" href="/static/monospace.css"><style>html,body{width:100%%;height:100%%}body{background:%s;margin:0;padding:0;overflow:hidden;font-family:var(--webterm-mono)}.webterm-terminal{width:100%%;height:100%%;display:block;overflow:hidden}</style></head><body><div id="terminal" class="webterm-terminal" %s></div><script type="module" src="/static/js/terminal.js"></script></body></html>`, htmlEscape(app.Name), themeBG, dataAttrs)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, page)
 }
 
