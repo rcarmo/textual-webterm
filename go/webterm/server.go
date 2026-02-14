@@ -283,7 +283,7 @@ func (s *LocalServer) markRouteActivity(routeKey string) {
 	s.mu.Lock()
 	s.routeLastActivity[routeKey] = now
 	last := s.routeLastSSE[routeKey]
-	if now.Sub(last) < 250*time.Millisecond {
+	if now.Sub(last) < 500*time.Millisecond {
 		s.mu.Unlock()
 		return
 	}
