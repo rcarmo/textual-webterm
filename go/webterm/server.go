@@ -876,7 +876,9 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		const floatingResultsEl = document.getElementById('floating-results');
 		const keyIndicatorEl = document.getElementById('key-indicator');
 		const thumbnailCache = {};
-		const THUMBNAIL_TTL_MS = 5000;
+		const refreshQueue = [];
+		const queuedRefresh = {};
+		let screenshotRequestInFlight = false;
 		const grid = document.getElementById('grid');
 		const subtitle = document.getElementById('subtitle');
 
@@ -931,14 +933,13 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		function getThumbnailSrc(tile) {
 			const slug = tile.slug || '';
 			if (!slug) return '';
-			const now = Date.now();
-			const existing = thumbnailCache[slug];
-			if (!existing || (now - existing.updatedAt) > THUMBNAIL_TTL_MS) {
-				const src = '/screenshot.svg?route_key=' + encodeURIComponent(slug) + '&_t=' + now;
-				thumbnailCache[slug] = { src, updatedAt: now };
-				return src;
+			const card = cardsBySlug[slug];
+			if (card && card.img && card.img.src) {
+				thumbnailCache[slug] = { src: card.img.src, updatedAt: Date.now() };
+				return card.img.src;
 			}
-			return existing.src;
+			const existing = thumbnailCache[slug];
+			return existing ? existing.src : '';
 		}
 
 		function updateTileSelection() {
@@ -1093,16 +1094,68 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 
 		document.addEventListener('keydown', handleKeydown);
 
-		function refreshTile(slug) {
+		function dashboardCanRequestScreenshots() {
+			return document.visibilityState === 'visible' && document.hasFocus();
+		}
+
+		function onDashboardFocusChanged() {
+			if (dashboardCanRequestScreenshots()) {
+				processRefreshQueue();
+			}
+		}
+
+		document.addEventListener('visibilitychange', onDashboardFocusChanged);
+		window.addEventListener('focus', onDashboardFocusChanged);
+		window.addEventListener('blur', onDashboardFocusChanged);
+
+		function processRefreshQueue() {
+			if (screenshotRequestInFlight || refreshQueue.length === 0 || !dashboardCanRequestScreenshots()) return;
+			const slug = refreshQueue.shift();
+			delete queuedRefresh[slug];
 			const card = cardsBySlug[slug];
-			if (!card) return;
-			card.img.src = '/screenshot.svg?route_key=' + encodeURIComponent(slug) + '&_t=' + Date.now();
+			if (!card || !card.img) {
+				setTimeout(processRefreshQueue, 0);
+				return;
+			}
+			screenshotRequestInFlight = true;
+			const img = card.img;
+			let released = false;
+			const release = () => {
+				if (released) return;
+				released = true;
+				screenshotRequestInFlight = false;
+				thumbnailCache[slug] = { src: img.currentSrc || img.src, updatedAt: Date.now() };
+				setTimeout(processRefreshQueue, 0);
+			};
+			const timeout = setTimeout(release, 5000);
+			const complete = () => {
+				clearTimeout(timeout);
+				img.removeEventListener('load', complete);
+				img.removeEventListener('error', complete);
+				release();
+			};
+			img.addEventListener('load', complete);
+			img.addEventListener('error', complete);
+			img.src = '/screenshot.svg?route_key=' + encodeURIComponent(slug);
+			if (typeof img.decode === 'function') {
+				img.decode().then(complete).catch(() => {});
+			}
+		}
+
+		function queueTileRefresh(slug) {
+			if (!slug || queuedRefresh[slug]) return;
+			queuedRefresh[slug] = true;
+			refreshQueue.push(slug);
+			processRefreshQueue();
+		}
+
+		function refreshTile(slug) {
+			queueTileRefresh(slug);
 		}
 
 		function refreshAll() {
 			for (const tile of tiles) {
-				const card = cardsBySlug[tile.slug];
-				if (card) card.img.src = '/screenshot.svg?route_key=' + encodeURIComponent(tile.slug);
+				queueTileRefresh(tile.slug);
 			}
 		}
 
@@ -1129,9 +1182,34 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		const pendingRefresh = {};
+		const lastRefresh = {};
+		const REFRESH_DEBOUNCE_MS = 500;
+
+		function scheduleRefreshTile(slug) {
+			const now = Date.now();
+			const last = lastRefresh[slug] || 0;
+			if (now - last < REFRESH_DEBOUNCE_MS) {
+				if (!pendingRefresh[slug]) {
+					pendingRefresh[slug] = setTimeout(() => {
+						pendingRefresh[slug] = null;
+						refreshTile(slug);
+						lastRefresh[slug] = Date.now();
+					}, REFRESH_DEBOUNCE_MS - (now - last));
+				}
+				return;
+			}
+			refreshTile(slug);
+			lastRefresh[slug] = now;
+		}
+
 		function renderTiles() {
 			grid.innerHTML = '';
 			cardsBySlug = {};
+			refreshQueue.length = 0;
+			for (const key in queuedRefresh) {
+				delete queuedRefresh[key];
+			}
 			if (tiles.length === 0) {
 				grid.innerHTML = '<div class="empty">No containers found. Start containers with the webterm-command label.</div>';
 				subtitle.textContent = dockerWatchMode ? 'Watching for containers with webterm-command label...' : '';
@@ -1159,7 +1237,7 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 				if (e.data === '__dashboard__') {
 					refreshTilesList();
 				} else {
-					refreshTile(e.data);
+					scheduleRefreshTile(e.data);
 				}
 			});
 			source.onerror = () => {
