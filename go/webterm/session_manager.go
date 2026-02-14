@@ -175,14 +175,13 @@ func (m *SessionManager) OnSessionEnd(sessionID string) {
 
 func (m *SessionManager) CloseAll() {
 	m.mu.RLock()
-	sessions := make([]Session, 0, len(m.sessions))
-	for _, session := range m.sessions {
-		sessions = append(sessions, session)
+	sessionIDs := make([]string, 0, len(m.sessions))
+	for sessionID := range m.sessions {
+		sessionIDs = append(sessionIDs, sessionID)
 	}
 	m.mu.RUnlock()
-	for _, session := range sessions {
-		_ = session.Close()
-		_ = session.Wait()
+	for _, sessionID := range sessionIDs {
+		m.CloseSession(sessionID)
 	}
 }
 

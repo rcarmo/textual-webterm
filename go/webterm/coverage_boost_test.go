@@ -141,8 +141,14 @@ func TestSessionManagerAPIsAndClosePaths(t *testing.T) {
 	_, _ = manager.NewSession("shell", "sid-2", "route-2", 80, 24)
 	_, _ = manager.NewSession("shell", "sid-3", "route-3", 80, 24)
 	manager.CloseAll()
-	if s := manager.GetSession("sid-2"); s != nil && s.IsRunning() {
-		t.Fatalf("CloseAll should stop session sid-2")
+	if s := manager.GetSession("sid-2"); s != nil {
+		t.Fatalf("CloseAll should remove session sid-2")
+	}
+	if s := manager.GetSession("sid-3"); s != nil {
+		t.Fatalf("CloseAll should remove session sid-3")
+	}
+	if manager.GetSessionByRouteKey("route-2") != nil || manager.GetSessionByRouteKey("route-3") != nil {
+		t.Fatalf("CloseAll should remove route mappings")
 	}
 }
 
