@@ -6,7 +6,7 @@
 
 This repository is the Go port of the original Python implementation, which is preserved in the `python` branch.
 
-<video src="docs/demo.mp4" controls playsinline muted loop></video>
+<video src="https://github.com/rcarmo/webterm/raw/refs/heads/main/docs/demo.mp4" controls playsinline muted loop></video>
 
 ## Features
 
