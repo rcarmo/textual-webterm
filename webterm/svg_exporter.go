@@ -60,7 +60,7 @@ func RenderTerminalSVG(
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %.1f %.1f" class="terminal-svg">`, svgWidth, svgHeight))
 	b.WriteString("<title>" + html.EscapeString(title) + "</title>")
-	b.WriteString(`<defs><style>.terminal-bg{fill:` + background + `}.terminal-text{font-family:ui-monospace,"SFMono-Regular","Fira Code",Menlo,Monaco,Consolas,"Liberation Mono","DejaVu Sans Mono","Courier New",monospace;font-size:14px;fill:` + foreground + `;white-space:pre;text-rendering:optimizeLegibility}.bold{font-weight:bold}.italic{font-style:italic}.underline{text-decoration:underline}</style></defs>`)
+	b.WriteString(`<defs><style>@font-face{font-family:"FiraCode Nerd Font";src:url("/static/fonts/FiraCodeNerdFont-Regular.ttf") format("truetype");font-style:normal;font-weight:400}@font-face{font-family:"FiraMono Nerd Font";src:url("/static/fonts/FiraCodeNerdFont-Regular.ttf") format("truetype");font-style:normal;font-weight:400}.terminal-bg{fill:` + background + `}.terminal-text{font-family:var(--webterm-mono,ui-monospace,"SFMono-Regular","FiraCode Nerd Font","FiraMono Nerd Font","Fira Code",Menlo,Monaco,Consolas,"Liberation Mono","DejaVu Sans Mono","Courier New",monospace);font-size:14px;fill:` + foreground + `;white-space:pre;text-rendering:optimizeLegibility}.bold{font-weight:bold}.italic{font-style:italic}.underline{text-decoration:underline}</style></defs>`)
 	b.WriteString(fmt.Sprintf(`<rect class="terminal-bg" x="0" y="0" width="%.1f" height="%.1f"/>`, svgWidth, svgHeight))
 	b.WriteString(`<g class="terminal-text">`)
 	for rowIdx := 0; rowIdx < len(buffer); rowIdx++ {

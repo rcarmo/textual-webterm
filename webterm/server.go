@@ -894,6 +894,9 @@ func (s *LocalServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	<meta name="theme-color" content="#0d1117">
 	<link rel="icon" href="/static/icons/webterm-192.png" sizes="192x192">
 	<style>
+		@font-face { font-family: "FiraCode Nerd Font"; src: url("/static/fonts/FiraCodeNerdFont-Regular.ttf") format("truetype"); font-style: normal; font-weight: 400; font-display: swap; }
+		@font-face { font-family: "FiraMono Nerd Font"; src: url("/static/fonts/FiraCodeNerdFont-Regular.ttf") format("truetype"); font-style: normal; font-weight: 400; font-display: swap; }
+		:root { --webterm-mono: ui-monospace, "SFMono-Regular", "FiraCode Nerd Font", "FiraMono Nerd Font", "Fira Code", "Roboto Mono", Menlo, Monaco, Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace; }
 		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 16px; background: #0f172a; color: #e2e8f0; }
 		h1 { margin-bottom: 8px; }
 		.subtitle { color: #64748b; font-size: 14px; margin-bottom: 16px; }
