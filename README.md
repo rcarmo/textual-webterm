@@ -6,7 +6,7 @@
 
 This repository is the Go port of the original Python implementation, which is preserved in the `python` branch.
 
-![Screenshot](docs/screenshot.png)
+<video src="docs/demo.mp4" controls playsinline muted loop></video>
 
 ## Features
 
