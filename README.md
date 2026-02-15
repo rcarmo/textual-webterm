@@ -12,8 +12,8 @@ This repository is the Go port of the original Python implementation, which is p
 
 - Typeahead find for quickly finding and launching sessions with minimal friction
 - Web terminal with reconnect support
-- Ghostty WebAssembly terminal engine for fast rendering
-- Session dashboard with live SVG screenshots
+- Ghostty WebAssembly terminal engine for fast rendering from [`ghostty-web`](https://github.com/rcarmo/ghostty-web)
+- Session dashboard with live SVG screenshots from [`go-te`](https://github.com/rcarmo/go-te)
 - Docker watch mode (`webterm-command` / `webterm-theme` labels)
 - Docker compose manifest ingestion
 - CPU sparkline tiles for compose services
